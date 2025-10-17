@@ -68,7 +68,7 @@ FetchContent_Declare(
         GIT_TAG master
 )
 FetchContent_MakeAvailable(tiny-cuda-nn)
-target_link_libraries(ngp-baseline-nv PRIVATE tiny-cuda-nn)
+target_link_libraries(ngp-baseline-nv PUBLIC tiny-cuda-nn)
 
 #FetchContent_Declare(
 #        dataset
@@ -77,3 +77,6 @@ target_link_libraries(ngp-baseline-nv PRIVATE tiny-cuda-nn)
 #)
 #FetchContent_MakeAvailable(dataset)
 #target_link_libraries(ngp-baseline-nv PRIVATE dataset::dataset)
+
+add_executable(ngp-baseline-nv-app main.cu)
+target_link_libraries(ngp-baseline-nv-app PRIVATE ngp-baseline-nv)
