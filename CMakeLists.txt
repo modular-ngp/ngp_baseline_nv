@@ -29,10 +29,7 @@ add_library(ngp-baseline-nv
         src/nerf_loader.cu
         src/render_buffer.cu
         src/testbed.cu
-        src/testbed_image.cu
         src/testbed_nerf.cu
-        src/testbed_sdf.cu
-        src/testbed_volume.cu
         src/thread_pool.cpp
         src/tinyexr_wrapper.cu
         src/tinyobj_loader_wrapper.cu
@@ -68,7 +65,19 @@ FetchContent_Declare(
         GIT_TAG master
 )
 FetchContent_MakeAvailable(tiny-cuda-nn)
-target_link_libraries(ngp-baseline-nv PUBLIC tiny-cuda-nn)
+
+
+cmrc_add_resource_library(ngp-resources NAMESPACE ngp)
+list(APPEND NGP_LIBRARIES ngp-resources)
+set(NGP_BUILD_WITH_RTC ON)
+if (NGP_BUILD_WITH_RTC)
+    # Create local directory that can serve as cache for the runtime compiled artifacts
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/rtc/cache")
+
+    file(GLOB_RECURSE NGP_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/include/neural-graphics-primitives/*")
+    cmrc_add_resources(ngp-resources WHENCE "${CMAKE_CURRENT_SOURCE_DIR}/include" ${NGP_HEADERS})
+endif()
+target_link_libraries(ngp-baseline-nv PUBLIC tiny-cuda-nn ngp-resources)
 
 #FetchContent_Declare(
 #        dataset

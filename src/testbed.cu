@@ -170,9 +170,9 @@ void Testbed::load_training_data(const fs::path& path) {
 
 	switch (m_testbed_mode) {
 		case ETestbedMode::Nerf: load_nerf(path); break;
-		case ETestbedMode::Sdf: load_mesh(path); break;
-		case ETestbedMode::Image: load_image(path); break;
-		case ETestbedMode::Volume: load_volume(path); break;
+		// case ETestbedMode::Sdf: load_mesh(path); break;
+		// case ETestbedMode::Image: load_image(path); break;
+		// case ETestbedMode::Volume: load_volume(path); break;
 		default: throw std::runtime_error{"Invalid testbed mode."};
 	}
 
@@ -577,10 +577,10 @@ ivec3 Testbed::compute_and_save_png_slices(
 	}
 
 	std::string fname = fmt::format(".density_slices_{}x{}x{}.png", res3d.x, res3d.y, res3d.z);
-	GPUMemory<float> density = (m_render_ground_truth && m_testbed_mode == ETestbedMode::Sdf) ?
-		get_sdf_gt_on_grid(res3d, aabb, render_aabb_to_local) :
-		get_density_on_grid(res3d, aabb, render_aabb_to_local);
-	save_density_grid_to_png(density, filename.str() + fname, res3d, thresh, flip_y_and_z_axes, range);
+	// GPUMemory<float> density = (m_render_ground_truth && m_testbed_mode == ETestbedMode::Sdf) ?
+		// get_sdf_gt_on_grid(res3d, aabb, render_aabb_to_local) :
+		// get_density_on_grid(res3d, aabb, render_aabb_to_local);
+	// save_density_grid_to_png(density, filename.str() + fname, res3d, thresh, flip_y_and_z_axes, range);
 	return res3d;
 }
 
@@ -3975,7 +3975,7 @@ bool Testbed::frame() {
 
 	train_and_render(skip_rendering);
 	if (m_testbed_mode == ETestbedMode::Sdf && m_sdf.calculate_iou_online) {
-		m_sdf.iou = calculate_iou(m_train ? 64 * 64 * 64 : 128 * 128 * 128, m_sdf.iou_decay, false, true);
+		// m_sdf.iou = calculate_iou(m_train ? 64 * 64 * 64 : 128 * 128 * 128, m_sdf.iou_decay, false, true);
 		m_sdf.iou_decay = 0.f;
 	}
 
@@ -4150,9 +4150,9 @@ ELossType Testbed::string_to_loss_type(const std::string& str) {
 Testbed::NetworkDims Testbed::network_dims() const {
 	switch (m_testbed_mode) {
 		case ETestbedMode::Nerf: return network_dims_nerf(); break;
-		case ETestbedMode::Sdf: return network_dims_sdf(); break;
-		case ETestbedMode::Image: return network_dims_image(); break;
-		case ETestbedMode::Volume: return network_dims_volume(); break;
+		// case ETestbedMode::Sdf: return network_dims_sdf(); break;
+		// case ETestbedMode::Image: return network_dims_image(); break;
+		// case ETestbedMode::Volume: return network_dims_volume(); break;
 		default: throw std::runtime_error{"Invalid mode."};
 	}
 }
@@ -4604,9 +4604,9 @@ void Testbed::train(uint32_t batch_size) {
 
 		switch (m_testbed_mode) {
 			case ETestbedMode::Nerf: training_prep_nerf(batch_size, m_stream.get()); break;
-			case ETestbedMode::Sdf: training_prep_sdf(batch_size, m_stream.get()); break;
-			case ETestbedMode::Image: training_prep_image(batch_size, m_stream.get()); break;
-			case ETestbedMode::Volume: training_prep_volume(batch_size, m_stream.get()); break;
+			// case ETestbedMode::Sdf: training_prep_sdf(batch_size, m_stream.get()); break;
+			// case ETestbedMode::Image: training_prep_image(batch_size, m_stream.get()); break;
+			// case ETestbedMode::Volume: training_prep_volume(batch_size, m_stream.get()); break;
 			default: throw std::runtime_error{"Invalid training mode."};
 		}
 
@@ -4632,9 +4632,9 @@ void Testbed::train(uint32_t batch_size) {
 
 		switch (m_testbed_mode) {
 			case ETestbedMode::Nerf: train_nerf(batch_size, get_loss_scalar, m_stream.get()); break;
-			case ETestbedMode::Sdf: train_sdf(batch_size, get_loss_scalar, m_stream.get()); break;
-			case ETestbedMode::Image: train_image(batch_size, get_loss_scalar, m_stream.get()); break;
-			case ETestbedMode::Volume: train_volume(batch_size, get_loss_scalar, m_stream.get()); break;
+			// case ETestbedMode::Sdf: train_sdf(batch_size, get_loss_scalar, m_stream.get()); break;
+			// case ETestbedMode::Image: train_image(batch_size, get_loss_scalar, m_stream.get()); break;
+			// case ETestbedMode::Volume: train_volume(batch_size, get_loss_scalar, m_stream.get()); break;
 			default: throw std::runtime_error{"Invalid training mode."};
 		}
 
@@ -4941,52 +4941,52 @@ void Testbed::render_frame_main(
 				);
 			}
 			break;
-		case ETestbedMode::Sdf: {
-			distance_fun_t distance_fun = m_render_ground_truth ?
-				(distance_fun_t)[&](uint32_t n_elements, const vec3* positions, float* distances, cudaStream_t stream) {
-				m_sdf.triangle_bvh->signed_distance_gpu(
-					n_elements, m_sdf.mesh_sdf_mode, positions, distances, m_sdf.triangles_gpu.data(), false, stream
-				);
-			} : (distance_fun_t)[&](uint32_t n_elements, const vec3* positions, float* distances, cudaStream_t stream) {
-				n_elements = next_multiple(n_elements, BATCH_SIZE_GRANULARITY);
-				GPUMatrix<float> positions_matrix((float*)positions, 3, n_elements);
-				GPUMatrix<float, RM> distances_matrix(distances, 1, n_elements);
-				m_network->inference(stream, positions_matrix, distances_matrix);
-			};
-
-			normals_fun_t normals_fun = m_render_ground_truth ?
-				(normals_fun_t)[&](uint32_t n_elements, const vec3* positions, vec3* normals, cudaStream_t stream){
-					// NO-OP. Normals will automatically be populated by raytrace
-				} :
-				(normals_fun_t)[&](uint32_t n_elements, const vec3* positions, vec3* normals, cudaStream_t stream) {
-				n_elements = next_multiple(n_elements, BATCH_SIZE_GRANULARITY);
-				GPUMatrix<float> positions_matrix((float*)positions, 3, n_elements);
-				GPUMatrix<float> normals_matrix((float*)normals, 3, n_elements);
-				m_network->input_gradient(stream, 0, positions_matrix, normals_matrix);
-			};
-
-			render_sdf(
-				device.stream(),
-				device,
-				distance_fun,
-				normals_fun,
-				device.render_buffer_view(),
-				focal_length,
-				camera_matrix0,
-				screen_center,
-				foveation,
-				lens,
-				visualized_dimension
-			);
-		} break;
-		case ETestbedMode::Image:
-			render_image(
-				device.stream(), device.render_buffer_view(), focal_length, camera_matrix0, screen_center, foveation, lens, visualized_dimension
-			);
-			break;
-		case ETestbedMode::Volume:
-			render_volume(device.stream(), device.render_buffer_view(), focal_length, camera_matrix0, screen_center, foveation, lens);
-			break;
+		// case ETestbedMode::Sdf: {
+		// 	distance_fun_t distance_fun = m_render_ground_truth ?
+		// 		(distance_fun_t)[&](uint32_t n_elements, const vec3* positions, float* distances, cudaStream_t stream) {
+		// 		m_sdf.triangle_bvh->signed_distance_gpu(
+		// 			n_elements, m_sdf.mesh_sdf_mode, positions, distances, m_sdf.triangles_gpu.data(), false, stream
+		// 		);
+		// 	} : (distance_fun_t)[&](uint32_t n_elements, const vec3* positions, float* distances, cudaStream_t stream) {
+		// 		n_elements = next_multiple(n_elements, BATCH_SIZE_GRANULARITY);
+		// 		GPUMatrix<float> positions_matrix((float*)positions, 3, n_elements);
+		// 		GPUMatrix<float, RM> distances_matrix(distances, 1, n_elements);
+		// 		m_network->inference(stream, positions_matrix, distances_matrix);
+		// 	};
+		//
+		// 	normals_fun_t normals_fun = m_render_ground_truth ?
+		// 		(normals_fun_t)[&](uint32_t n_elements, const vec3* positions, vec3* normals, cudaStream_t stream){
+		// 			// NO-OP. Normals will automatically be populated by raytrace
+		// 		} :
+		// 		(normals_fun_t)[&](uint32_t n_elements, const vec3* positions, vec3* normals, cudaStream_t stream) {
+		// 		n_elements = next_multiple(n_elements, BATCH_SIZE_GRANULARITY);
+		// 		GPUMatrix<float> positions_matrix((float*)positions, 3, n_elements);
+		// 		GPUMatrix<float> normals_matrix((float*)normals, 3, n_elements);
+		// 		m_network->input_gradient(stream, 0, positions_matrix, normals_matrix);
+		// 	};
+		//
+		// 	render_sdf(
+		// 		device.stream(),
+		// 		device,
+		// 		distance_fun,
+		// 		normals_fun,
+		// 		device.render_buffer_view(),
+		// 		focal_length,
+		// 		camera_matrix0,
+		// 		screen_center,
+		// 		foveation,
+		// 		lens,
+		// 		visualized_dimension
+		// 	);
+		// } break;
+		// case ETestbedMode::Image:
+		// 	render_image(
+		// 		device.stream(), device.render_buffer_view(), focal_length, camera_matrix0, screen_center, foveation, lens, visualized_dimension
+		// 	);
+		// 	break;
+		// case ETestbedMode::Volume:
+		// 	render_volume(device.stream(), device.render_buffer_view(), focal_length, camera_matrix0, screen_center, foveation, lens);
+		// 	break;
 		default:
 			// No-op if no mode is active
 			break;
