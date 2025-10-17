@@ -1,0 +1,8 @@
+{
+  "name": "ngp-nv-deps",
+  "version": "0.1.0",
+  "supports": "windows & x64",
+  "dependencies": [
+    "zstr"
+  ]
+}

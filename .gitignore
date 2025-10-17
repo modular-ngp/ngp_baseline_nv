@@ -125,3 +125,5 @@ vcpkg.json.user
 # ImGui settings
 imgui.ini
 /data/
+
+/vendor/
