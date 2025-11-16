@@ -104,6 +104,137 @@
 
 后续 Phase 3–5 将只在 `ngp-minimal` 中实现“需要搬迁”的子集。
 
+### Phase 1 当前仓库分析记录（基于现有代码）
+
+> 本小节是对当前仓库中 NeRF-synthetic 训练路径的“使用子图”第一次系统梳理，后续可以在实现过程中继续补充细节。
+
+#### 1. 参考场景与命令（完整版）
+
+- 数据集：使用仓库中已存在的 `data/nerf-synthetic`：
+  - 推荐基线：`data/nerf-synthetic/lego` 与 `data/nerf-synthetic/chair`。
+- 配置：
+  - 主配置：`configs/nerf/base.json`。
+  - 快速回归可选：`configs/nerf/base_0layer.json`（极小网络）。
+- 典型训练命令（完整版）：
+  - `./ngp-baseline-nv-app --scene data/nerf-synthetic/lego --config configs/nerf/base.json --no-gui`
+  - `./ngp-baseline-nv-app --scene data/nerf-synthetic/chair --config configs/nerf/base.json --no-gui`
+- 日志格式（我们后续在 ngp-minimal 里会对齐）：
+  - `iteration=<n> loss=<scalar>`（由 `main.cu` 中 `while (testbed.frame())` 输出）。
+
+#### 2. 顶层调用链子图（从 CLI 到训练）
+
+以当前 `main.cu` 为准，当只使用 `--scene` 与 `--config`（不拖文件、不用 GUI）时，实际走到的主要函数链为：
+
+- `main` / `wmain`
+  - 解析 `argv` 为 `std::vector<std::string>`，调用：
+  - `ngp::main_func(const std::vector<std::string>& arguments)`
+    - 使用 `args::ArgumentParser` 解析：`--scene`, `--config/--network`, `--snapshot/--load_snapshot`, `--no-train` 等；
+    - 构造：`Testbed testbed;`
+    - 若给定 `--scene`：`testbed.load_training_data(scene_path);`
+    - 若给定 `--snapshot`：`testbed.load_snapshot(snapshot_path);`  
+      否则若给定 `--config`：`testbed.reload_network_from_file(config_path);`
+    - 设置：`testbed.m_train = !no_train_flag;`
+    - 主循环：
+      - `while (testbed.frame()) { tlog::info() << "iteration=" << m_training_step << " loss=" << m_loss_scalar.val(); }`
+
+- `Testbed::load_training_data(const fs::path& path)`（只考虑 NeRF 路径）：
+  - 校验路径存在；
+  - `ETestbedMode scene_mode = mode_from_scene(path.str());`
+  - `set_mode(scene_mode);`（NeRF 场景会设置为 `ETestbedMode::Nerf`）；
+  - `m_data_path = path;`
+  - `switch (m_testbed_mode) { case ETestbedMode::Nerf: load_nerf(path); ... }`
+  - `m_training_data_available = true;`
+
+- `Testbed::set_mode(ETestbedMode mode)`（与训练相关的部分）：
+  - 重置模式相关成员：`m_mesh = {}; m_nerf = {};`；
+  - 清空网络/优化器状态：`m_encoding`, `m_loss`, `m_network`, `m_nerf_network`, `m_optimizer`, `m_trainer`, `m_envmap`, `m_distortion`；
+  - 清空设备相关数据：`for (auto&& device : m_devices) device.clear();`
+  - 设置 `m_testbed_mode = mode;` 并调用 `reset_camera();`
+  - 对 NeRF 模式有 DLSS 多 GPU 相关的逻辑，未来 ngp-minimal 可以简化为“单 GPU + 无 DLSS”。
+
+- `Testbed::load_nerf(const fs::path& data_path)`（NeRF 数据加载入口）：
+  - 构造 JSON 路径列表（目录下所有 `.json`）：
+    - train/test/val：`transforms_*.json`；
+  - 记录之前的 `aabb_scale`；
+  - `m_nerf.training.dataset = ngp::load_nerf(json_paths, m_nerf.sharpen);`
+  - 如 `aabb_scale` 变化且已有网络配置，则调用 `reset_network()`；
+  - 紧接着调用 `load_nerf_post()`（在 `testbed_nerf.cu` 中），完成 density grid 等训练状态初始化。
+
+- `Testbed::frame()`（只看训练路径相关逻辑）：
+  - 根据 `m_train` 与摄像机变化情况决定是否 `skip_rendering`；
+  - 若在录制 camera path，则调用 `prepare_next_camera_path_frame()`（可视为可选路径）；
+  - 调用 `train_and_render(skip_rendering);`；
+  - 返回 `true`（主循环就停在这里）。
+
+- `Testbed::train_and_render(bool skip_rendering)`（NeRF-relevant 部分）：
+  - 若 `m_reload_network` 等标记置位，则调用 `reload_network_from_file` 或 `reset_network`；
+  - 若 `m_train == true`，则调用 `train(m_training_batch_size);`；
+  - 渲染部分会调用 `render_frame` / `render_nerf`，用于产生当前视角输出（ngp-minimal 可以初期只保留训练路径，渲染可选）。
+
+- `Testbed::train(uint32_t batch_size)`（在 NeRF 模式下）：
+  - 根据 `m_testbed_mode` 选择：`case ETestbedMode::Nerf: training_prep_nerf(batch_size, stream); train_nerf_step(batch_size, m_nerf.training.counters_rgb, stream);`；
+  - 更新训练计数器（`m_training_step`、各种统计信息等）。
+
+- `Testbed::training_prep_nerf` / `Testbed::train_nerf_step`（`src/testbed_nerf.cu`）：
+  - `training_prep_nerf`：根据当前 `m_training_step` 调用 `update_density_grid_nerf`，刷新 occupancy/density grid；
+  - `train_nerf_step`：
+    - 分配训练临时缓冲（rays、coords、mlp 输出、梯度等）；
+    - 生成训练样本（调用 `generate_training_samples_nerf` 内核）；
+    - 前向网络（`m_network->inference_mixed_precision` 或 fused JIT 内核）；
+    - 计算损失（`compute_loss_kernel_train_nerf` 或 fused JIT）；
+    - 回写梯度并通过 `m_trainer->training_step` 完成反向与优化；
+    - 可选：envmap 训练、error map 更新、camera / extra dims 优化等高阶功能。
+
+以上就是当前 NeRF-synthetic 训练在完整版中的主路径；`ngp-minimal` 的目标是只重建这条链上**实际被使用**的节点，并确保类名 / 函数名 / 调用顺序尽量一致。
+
+#### 3. 初步结构体字段使用分析（示例：NerfDataset & Testbed::Nerf）
+
+> 这里先给出一个粗粒度视图，后续在实现过程中可以延伸为更细的字段级列表。
+
+- `struct NerfDataset`（`include/neural-graphics-primitives/nerf_loader.h`）
+  - **在 NeRF-synthetic 训练中明显被使用的字段：**
+    - `std::vector<TrainingImageMetadata> metadata;` / `GPUMemory<TrainingImageMetadata> metadata_gpu;`
+      - 包含每张图像的 `resolution`, `focal_length`, `principal_point`, `lens`, `rolling_shutter`, `pixels`, `depth` 等；
+      - 训练时用于 ray 生成和 loss 计算。
+    - `std::vector<TrainingXForm> xforms;`
+      - 训练时用于从训练视角构造相机位姿/方向。
+    - `std::vector<std::string> paths;`
+      - 主要用于日志和调试，可视为「次要但有用」。
+    - `GPUMemory<uint8_t> pixelmemory[...]` / `GPUMemory<float> depthmemory[...]` / `GPUMemory<Ray> raymemory[...]`：
+      - pixelmemory：必需（训练用 RGB）；
+      - depthmemory/raymemory：仅在启用深度监督或预计算 rays 时使用，默认配置下可以视作可选。
+    - `GPUMemory<float> sharpness_data;` / `ivec2 sharpness_resolution;`
+      - 在 error map 可视化与与 sharpness 结合采样时使用；
+      - 在默认不启用 error overlay 时，仅在可视化路径中使用，可考虑不搬或延后搬迁。
+    - `BoundingBox render_aabb; mat3 render_aabb_to_local; vec3 up; vec3 offset;`
+      - 用于定义训练/渲染空间的边界和方向，是 ray marching 与 density grid 的基础。
+    - `size_t n_images; float scale; int aabb_scale;`
+      - 训练循环中广泛使用（采样、grid 大小等）。
+  - **只在高阶功能中出现、可考虑暂不搬迁的字段：**
+    - `GPUMemory<float> envmap_data; ivec2 envmap_resolution; bool is_hdr;`
+      - 仅在 envmap 训练路径中使用。
+    - `bool wants_importance_sampling;`
+      - 一定程度上影响采样策略，但可以在 minimal 里先实现简化策略。
+    - `uint32_t n_extra_learnable_dims; bool has_light_dirs;`
+      - 与额外 latent code / 光照方向扩展训练相关，可初期跳过。
+
+- `Testbed::Nerf::Training`（在 `testbed.h` 中的嵌套结构）
+  - **明显在训练路径中用到的成员：**
+    - `dataset`：即上面的 `NerfDataset`；
+    - `density_grid`, `density_grid_mean`, `n_steps_between_error_map_updates` 等 density grid/占空间统计相关；
+    - `counters_rgb`：记录 batch 尺寸与统计；
+    - `loss_type`, `depth_loss_type`, `random_bg_color`, `linear_colors` 等 loss & 渲染策略配置；
+    - `train_mode`（`ETrainMode::Nerf`）、`snap_to_pixel_centers` 等训练选项。
+  - **主要用于高阶特性，可以在 minimal 里简化或先不实现的成员：**
+    - `error_map` 及其 `cdf_*` 字段：用于 error-based 重要性采样和可视化；
+    - `train_envmap` 和相关 envmap 训练成员；
+    - `optimize_extrinsics`, `optimize_distortion`, `optimize_focal_length`, `optimize_exposure` 及对应梯度/优化器：用于在线标定和曝光学习。
+
+在后续实现 ngp-minimal 时，我们会根据这种分类：
+
+- 对「训练主路径中必用」的字段与方法，在 ngp-minimal 里用相同名字实现；
+- 对「只在高阶或可视化路径中使用」的部分则不搬迁，除非后面确实需要扩展。这样就真正做到了“按需搬迁 + 去冗余”。
+
 ---
 
 ## Phase 2：`ngp-minimal` 工程骨架 + 独立 CLI
@@ -385,4 +516,3 @@ while (testbed.frame()) {
 - 结构上高度贴近原始 instant-ngp 的 NeRF-synthetic 流程，便于理解与后续拓展；
 -
   代码规模和依赖则显著缩减，只保留与你当前“训练 NeRF-synthetic 数据集”需求相关的核心部分。 
-
