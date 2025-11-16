@@ -19,6 +19,9 @@ endif()
 add_executable(ngp-minimal-app
     src/main.cu
     src/nerf_loader.cu
+    src/nerf_network.cu
+    src/testbed.cu
+    src/testbed_nerf.cu
 )
 
 # Include directories - ONLY from ngp-minimal and vendors

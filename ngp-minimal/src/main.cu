@@ -3,6 +3,7 @@
  * Main entry point with CLI argument parsing
  */
 
+#include <ngp-minimal/testbed.h>
 #include <ngp-minimal/nerf_loader.h>
 #include <ngp-minimal/common.h>
 
@@ -132,69 +133,58 @@ int main_func(const std::vector<std::string>& arguments) {
         std::cout << "  Training: ENABLED" << std::endl;
     }
 
-    // TODO: Phase 3-5 implementation
-
-    tlog::success() << "\nngp-minimal: Phase 2 complete - CLI parsing works!";
-
-    // Phase 3: Test data loading
+    // Phase 3 & 4: Test data loading and training
     if (scene_flag) {
         try {
-            tlog::info() << "\n=== Phase 3: Testing Data Loading ===";
+            tlog::info() << "\n=== Phase 3 & 4: Testing Data Loading & Training ===";
 
-            fs::path scene_path = get(scene_flag);
-            std::vector<fs::path> json_paths;
+            // Create Testbed
+            tlog::info() << "Creating Testbed...";
+            ngp::Testbed testbed(ngp::ETestbedMode::Nerf);
 
-            // Look for transform JSON files
-            if (scene_path.is_directory()) {
-                // Try standard NeRF-synthetic file names
-                std::vector<std::string> json_names = {
-                    "transforms_train.json",
-                    "transforms_val.json",
-                    "transforms_test.json"
-                };
+            // Load training data
+            tlog::info() << "Loading training data...";
+            testbed.load_training_data(get(scene_flag));
 
-                for (const auto& name : json_names) {
-                    fs::path json_path = scene_path / name;
-                    if (json_path.exists()) {
-                        json_paths.push_back(json_path);
-                        tlog::info() << "Found: " << json_path.str();
-                    }
-                }
-            } else if (scene_path.is_file()) {
-                json_paths.push_back(scene_path);
-            }
-
-            if (json_paths.empty()) {
-                tlog::error() << "No transform JSON files found in: " << scene_path.str();
+            // Load network config if provided
+            if (config_flag) {
+                tlog::info() << "Loading network configuration...";
+                testbed.reload_network_from_file(get(config_flag));
             } else {
-                // Load the dataset
-                tlog::info() << "Loading dataset...";
-                auto dataset = load_nerf(json_paths);
-
-                tlog::success() << "\n=== Dataset loaded successfully! ===";
-                tlog::info() << "Summary:";
-                tlog::info() << "  Total images: " << dataset.n_images;
-                tlog::info() << "  Image resolution: " << dataset.metadata[0].resolution.x
-                            << " x " << dataset.metadata[0].resolution.y;
-                tlog::info() << "  Focal length: " << dataset.metadata[0].focal_length.x
-                            << " (x), " << dataset.metadata[0].focal_length.y << " (y)";
-                tlog::info() << "  AABB scale: " << dataset.aabb_scale;
-                tlog::info() << "  Scale: " << dataset.scale;
-                tlog::info() << "  Offset: (" << dataset.offset.x << ", "
-                            << dataset.offset.y << ", " << dataset.offset.z << ")";
-
-                tlog::success() << "\nPhase 3 complete - Data loading works!";
+                tlog::info() << "Using default network configuration...";
+                testbed.create_empty_nerf_network();
             }
+
+            // Set training mode
+            testbed.m_train = !no_train_flag;
+
+            if (testbed.m_train) {
+                tlog::success() << "\n=== Starting Training ===";
+                tlog::info() << "Training for 1000 iterations...";
+
+                // Training loop
+                for (int i = 0; i < 1000 && testbed.frame(); ++i) {
+                    // Progress is logged inside frame()
+                }
+
+                tlog::success() << "\nTraining complete!";
+                tlog::info() << "Final iteration: " << testbed.m_training_step;
+                tlog::info() << "Final loss: " << testbed.m_loss_scalar;
+            } else {
+                tlog::info() << "Training disabled (--no-train flag)";
+            }
+
+            tlog::success() << "\nPhase 4 complete - Training works!";
         } catch (const std::exception& e) {
-            tlog::error() << "Failed to load dataset: " << e.what();
+            tlog::error() << "Failed: " << e.what();
             return 1;
         }
     } else {
-        tlog::info() << "\nTo test Phase 3 data loading, provide --scene parameter";
-        tlog::info() << "Example: ngp-minimal-app --scene data/nerf-synthetic/lego";
+        tlog::info() << "\nTo test Phase 3 & 4, provide --scene parameter";
+        tlog::info() << "Example: ngp-minimal-app --scene data/nerf-synthetic/lego --config configs/nerf/base.json";
     }
 
-    tlog::info() << "\nNext: Implement Phase 4 (network & training)";
+    tlog::info() << "\nNext: Implement Phase 5 (full training integration)";
 
     return 0;
 }
