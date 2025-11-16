@@ -166,25 +166,9 @@ int main_func(const std::vector<std::string>& arguments) {
 
 	testbed.m_train = !no_train_flag;
 
-#ifdef NGP_GUI
-	bool gui = !no_gui_flag;
-#else
-	bool gui = false;
-#endif
-
-	if (gui) {
-		testbed.init_window(width_flag ? get(width_flag) : 1920, height_flag ? get(height_flag) : 1080);
-	}
-
-	if (vr_flag) {
-		testbed.init_vr();
-	}
-
 	// Render/training loop
 	while (testbed.frame()) {
-		if (!gui) {
-			tlog::info() << "iteration=" << testbed.m_training_step << " loss=" << testbed.m_loss_scalar.val();
-		}
+		tlog::info() << "iteration=" << testbed.m_training_step << " loss=" << testbed.m_loss_scalar.val();
 	}
 
 	return 0;

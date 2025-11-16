@@ -34,11 +34,13 @@
 #include <tiny-cuda-nn/rtc_kernel.h>
 #include <tiny-cuda-nn/trainer.h>
 
+#ifdef NGP_GUI
 #include <imgui/imgui.h>
 #include <imgui/backends/imgui_impl_glfw.h>
 #include <imgui/backends/imgui_impl_opengl3.h>
 #include <imgui/misc/cpp/imgui_stdlib.h>
 #include <imguizmo/ImGuizmo.h>
+#endif
 
 #include <json/json.hpp>
 
@@ -104,8 +106,6 @@ std::string get_filename_in_data_path_with_suffix(fs::path data_path, fs::path n
 	return data_path.stem().str() + "_" + default_name + std::string(suffix);
 }
 
-void Testbed::update_imgui_paths() {}
-
 void Testbed::load_training_data(const fs::path& path) {
 	if (!path.exists()) {
 		throw std::runtime_error{fmt::format("Data path '{}' does not exist.", path.str())};
@@ -130,8 +130,6 @@ void Testbed::load_training_data(const fs::path& path) {
 	}
 
 	m_training_data_available = true;
-
-	update_imgui_paths();
 }
 
 void Testbed::reload_training_data() {
@@ -1061,19 +1059,9 @@ void Testbed::imgui() {
 			}
 		}
 
-		if (!m_hmd) {
-			if (ImGui::Button("Connect to VR/AR headset")) {
-				try {
-					init_vr();
-				} catch (const std::runtime_error& e) {
-					imgui_error_string = e.what();
-					ImGui::OpenPopup("Error");
-				}
-			}
-		} else {
+		if (m_hmd) {
 			if (ImGui::Button("Disconnect from VR/AR headset")) {
 				m_hmd.reset();
-				update_vr_performance_settings();
 			} else if (ImGui::TreeNodeEx("VR/AR settings", ImGuiTreeNodeFlags_DefaultOpen)) {
 				static int blend_mode_idx = 0;
 				const auto& supported_blend_modes = m_hmd->supported_environment_blend_modes();
@@ -1081,7 +1069,6 @@ void Testbed::imgui() {
 					if (ImGui::Combo("Environment", &blend_mode_idx, m_hmd->supported_environment_blend_modes_imgui_string())) {
 						auto b = m_hmd->supported_environment_blend_modes().at(blend_mode_idx);
 						m_hmd->set_environment_blend_mode(b);
-						update_vr_performance_settings();
 					}
 				}
 
@@ -1787,45 +1774,7 @@ void Testbed::imgui() {
 	}
 
 	if (ImGui::CollapsingHeader("Histograms of encoding parameters")) {
-		ImGui::Checkbox("Gather histograms", &m_gather_histograms);
-
-		static float maxlevel = 1.f;
-		if (ImGui::SliderFloat("Max level", &maxlevel, 0.f, 1.f)) {
-			set_max_level(maxlevel);
-		}
-		ImGui::SameLine();
-		ImGui::Text("%0.1f%% values snapped to 0", m_quant_percent);
-
-		std::vector<float> f(m_n_levels);
-
-
-		// Hashgrid statistics
-		for (uint32_t i = 0; i < m_n_levels; ++i) {
-			f[i] = m_level_stats[i].mean();
-		}
-		ImGui::PlotHistogram("Grid means", f.data(), m_n_levels, 0, "means", FLT_MAX, FLT_MAX, ImVec2(0, 60.f));
-		for (uint32_t i = 0; i < m_n_levels; ++i) {
-			f[i] = m_level_stats[i].sigma();
-		}
-		ImGui::PlotHistogram("Grid sigmas", f.data(), m_n_levels, 0, "sigma", FLT_MAX, FLT_MAX, ImVec2(0, 60.f));
-		ImGui::Separator();
-
-
-		// Histogram of trained hashgrid params
-		ImGui::SliderInt("Show details for level", (int*)&m_histo_level, 0, m_n_levels - 1);
-		if (m_histo_level < m_n_levels) {
-			LevelStats& s = m_level_stats[m_histo_level];
-			static bool excludezero = false;
-			if (excludezero) {
-				m_histo[128] = 0.f;
-			}
-			ImGui::PlotHistogram("Values histogram", m_histo, 257, 0, "", FLT_MAX, FLT_MAX, ImVec2(0, 120.f));
-			ImGui::SliderFloat("Histogram horizontal scale", &m_histo_scale, 0.01f, 2.f);
-			ImGui::Checkbox("Exclude 'zero' from histogram", &excludezero);
-			ImGui::Text("Range: %0.5f - %0.5f", s.min, s.max);
-			ImGui::Text("Mean: %0.5f Sigma: %0.5f", s.mean(), s.sigma());
-			ImGui::Text("Num Zero: %d (%0.1f%%)", s.numzero, s.fraczero() * 100.f);
-		}
+		// Hashgrid histogram UI removed in headless build.
 	}
 
 	if (ImGui::BeginPopupModal("Error", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -1841,7 +1790,7 @@ void Testbed::imgui() {
 	}
 
 	if (ImGui::Button("Go to python REPL")) {
-		m_want_repl = true;
+		// Python REPL removed in headless build.
 	}
 
 	ImGui::End();
@@ -1994,222 +1943,9 @@ void Testbed::draw_visualizations(ImDrawList* list, const mat4x3& camera_matrix)
 
 void glfw_error_callback(int error, const char* description) { tlog::error() << "GLFW error #" << error << ": " << description; }
 
-bool Testbed::keyboard_event() {
-	if (ImGui::GetIO().WantCaptureKeyboard) {
-		return false;
-	}
+bool Testbed::keyboard_event() { return false; }
 
-	if (m_keyboard_event_callback && m_keyboard_event_callback()) {
-		return false;
-	}
-
-	if (ImGui::IsKeyPressed('Q') && ImGui::GetIO().KeyCtrl) {
-		glfwSetWindowShouldClose(m_glfw_window, GLFW_TRUE);
-	}
-
-	if ((ImGui::IsKeyPressed(GLFW_KEY_TAB) || ImGui::IsKeyPressed(GLFW_KEY_GRAVE_ACCENT)) && !ImGui::GetIO().KeyCtrl) {
-		m_imgui.show = !m_imgui.show;
-	}
-
-	bool ctrl = ImGui::GetIO().KeyCtrl;
-	bool shift = ImGui::GetIO().KeyShift;
-
-	for (int idx = 0; idx < std::min((int)ERenderMode::NumRenderModes, 10); ++idx) {
-		char c[] = {"1234567890"};
-		if (shift) {
-			if (ImGui::IsKeyPressed(c[idx])) {
-				m_nerf.training.train_mode = (ETrainMode)idx;
-			}
-		} else {
-			if (ImGui::IsKeyPressed(c[idx])) {
-				m_render_mode = (ERenderMode)idx;
-				reset_accumulation();
-			}
-		}
-	}
-
-	if (ImGui::IsKeyPressed('Z')) {
-		m_camera_path.m_gizmo_op = ImGuizmo::TRANSLATE;
-	}
-
-	if (ImGui::IsKeyPressed('X')) {
-		m_camera_path.m_gizmo_op = ImGuizmo::ROTATE;
-	}
-
-	if (ImGui::IsKeyPressed('E')) {
-		set_exposure(m_exposure + (shift ? -0.5f : 0.5f));
-		redraw_next_frame();
-	}
-
-	if (ImGui::IsKeyPressed('R')) {
-		if (shift) {
-			reset_camera();
-		} else {
-			if (ctrl) {
-				reload_training_data();
-				// After reloading the training data, also reset the NN.
-				// Presumably, there is no use case where the user would
-				// like to hot-reload the same training data set other than
-				// to slightly tweak its parameters. And to observe that
-				// effect meaningfully, the NN should be trained from scratch.
-			}
-
-			reload_network_from_file();
-		}
-	}
-
-	if (m_training_data_available) {
-		if (ImGui::IsKeyPressed('O')) {
-			m_nerf.training.render_error_overlay = !m_nerf.training.render_error_overlay;
-		}
-
-		if (ImGui::IsKeyPressed('G')) {
-			m_render_ground_truth = !m_render_ground_truth;
-			reset_accumulation();
-		}
-
-		if (ImGui::IsKeyPressed('T')) {
-			set_train(!m_train);
-		}
-	}
-
-	if (ImGui::IsKeyPressed('.')) {
-		if (m_single_view) {
-			if (m_visualized_dimension == network_width(m_visualized_layer) - 1 &&
-				m_visualized_layer < network_num_forward_activations() - 1) {
-				set_visualized_layer(std::max(0, std::min((int)network_num_forward_activations() - 1, m_visualized_layer + 1)));
-				set_visualized_dim(0);
-			} else {
-				set_visualized_dim(std::max(-1, std::min((int)network_width(m_visualized_layer) - 1, m_visualized_dimension + 1)));
-			}
-		} else {
-			set_visualized_layer(std::max(0, std::min((int)network_num_forward_activations() - 1, m_visualized_layer + 1)));
-		}
-	}
-
-	if (ImGui::IsKeyPressed(',')) {
-		if (m_single_view) {
-			if (m_visualized_dimension == 0 && m_visualized_layer > 0) {
-				set_visualized_layer(std::max(0, std::min((int)network_num_forward_activations() - 1, m_visualized_layer - 1)));
-				set_visualized_dim(network_width(m_visualized_layer) - 1);
-			} else {
-				set_visualized_dim(std::max(-1, std::min((int)network_width(m_visualized_layer) - 1, m_visualized_dimension - 1)));
-			}
-		} else {
-			set_visualized_layer(std::max(0, std::min((int)network_num_forward_activations() - 1, m_visualized_layer - 1)));
-		}
-	}
-
-	if (ImGui::IsKeyPressed('M')) {
-		m_single_view = !m_single_view;
-		set_visualized_dim(-1);
-		reset_accumulation();
-	}
-
-
-	if (ImGui::IsKeyPressed('N')) {
-		m_sdf.analytic_normals = !m_sdf.analytic_normals;
-		reset_accumulation();
-	}
-
-	if (ImGui::IsKeyPressed('[')) {
-		if (shift) {
-			first_training_view();
-		} else {
-			previous_training_view();
-		}
-	}
-
-	if (ImGui::IsKeyPressed(']')) {
-		if (shift) {
-			last_training_view();
-		} else {
-			next_training_view();
-		}
-	}
-
-	if (ImGui::IsKeyPressed('=') || ImGui::IsKeyPressed('+')) {
-		if (m_fps_camera) {
-			m_camera_velocity *= 1.5f;
-		} else {
-			set_scale(m_scale * 1.1f);
-		}
-	}
-
-	if (ImGui::IsKeyPressed('-') || ImGui::IsKeyPressed('_')) {
-		if (m_fps_camera) {
-			m_camera_velocity /= 1.5f;
-		} else {
-			set_scale(m_scale / 1.1f);
-		}
-	}
-
-	// WASD camera movement
-	vec3 translate_vec = vec3(0.0f);
-	if (ImGui::IsKeyDown('W')) {
-		translate_vec.z += 1.0f;
-	}
-
-	if (ImGui::IsKeyDown('A')) {
-		translate_vec.x += -1.0f;
-	}
-
-	if (ImGui::IsKeyDown('S')) {
-		translate_vec.z += -1.0f;
-	}
-
-	if (ImGui::IsKeyDown('D')) {
-		translate_vec.x += 1.0f;
-	}
-
-	if (ImGui::IsKeyDown(' ')) {
-		translate_vec.y += -1.0f;
-	}
-
-	if (ImGui::IsKeyDown('C')) {
-		translate_vec.y += 1.0f;
-	}
-
-	translate_vec *= m_camera_velocity * m_frame_ms.val() / 1000.0f;
-	if (shift) {
-		translate_vec *= 5.0f;
-	}
-
-	if (translate_vec != vec3(0.0f)) {
-		m_fps_camera = true;
-
-		// If VR is active, movement that isn't aligned with the current view
-		// direction is _very_ jarring to the user, so make keyboard-based
-		// movement aligned with the VR view, even though it is not an intended
-		// movement mechanism. (Users should use controllers.)
-		translate_camera(translate_vec, m_hmd && m_hmd->is_visible() ? mat3(m_views.front().camera0) : mat3(m_camera));
-	}
-
-	return false;
-}
-
-void Testbed::mouse_wheel() {
-	float delta = ImGui::GetIO().MouseWheel;
-	if (delta == 0) {
-		return;
-	}
-
-	float scale_factor = pow(1.1f, -delta);
-	set_scale(m_scale * scale_factor);
-
-	// When in image mode, zoom around the hovered point.
-	if (m_testbed_mode == ETestbedMode::Image) {
-		vec2 mouse = {ImGui::GetMousePos().x, ImGui::GetMousePos().y};
-		vec3 offset = get_3d_pos_from_pixel(*m_views.front().render_buffer, mouse) - look_at();
-
-		// Don't center around infinitely distant points.
-		if (length(offset) < 256.0f) {
-			m_camera[3] += offset * (1.0f - scale_factor);
-		}
-	}
-
-	reset_accumulation(true);
-}
+void Testbed::mouse_wheel() {}
 
 mat3 Testbed::rotation_from_angles(const vec2& angles) const {
 	vec3 up = m_up_dir;
@@ -2217,73 +1953,7 @@ mat3 Testbed::rotation_from_angles(const vec2& angles) const {
 	return rotmat(angles.x, up) * rotmat(angles.y, side);
 }
 
-void Testbed::mouse_drag() {
-	vec2 rel = vec2{ImGui::GetIO().MouseDelta.x, ImGui::GetIO().MouseDelta.y} / (float)m_window_res[m_fov_axis];
-	vec2 mouse = {ImGui::GetMousePos().x, ImGui::GetMousePos().y};
-
-	vec3 side = m_camera[0];
-
-	bool shift = ImGui::GetIO().KeyShift;
-
-	// Left pressed
-	if (ImGui::GetIO().MouseClicked[0] && shift) {
-		m_autofocus_target = get_3d_pos_from_pixel(*m_views.front().render_buffer, mouse);
-		m_autofocus = true;
-
-		reset_accumulation();
-	}
-
-	// Left held
-	if (ImGui::GetIO().MouseDown[0]) {
-		float rot_sensitivity = m_fps_camera ? 0.35f : 1.0f;
-		mat3 rot = rotation_from_angles(-rel * 2.0f * PI() * rot_sensitivity);
-
-		if (m_fps_camera) {
-			rot *= mat3(m_camera);
-			m_camera = mat4x3(rot[0], rot[1], rot[2], m_camera[3]);
-		} else {
-			// Turntable
-			auto old_look_at = look_at();
-			set_look_at({0.0f, 0.0f, 0.0f});
-			m_camera = rot * m_camera;
-			set_look_at(old_look_at);
-		}
-
-		reset_accumulation(true);
-	}
-
-	// Right held
-	if (ImGui::GetIO().MouseDown[1]) {
-		mat3 rot = rotation_from_angles(-rel * 2.0f * PI());
-		if (m_render_mode == ERenderMode::Shade) {
-			m_sun_dir = transpose(rot) * m_sun_dir;
-		}
-
-		m_slice_plane_z += -rel.y * m_bounding_radius;
-		reset_accumulation();
-	}
-
-	// Middle pressed
-	if (ImGui::GetIO().MouseClicked[2]) {
-		m_drag_depth = get_depth_from_renderbuffer(*m_views.front().render_buffer, mouse / vec2(m_window_res));
-	}
-
-	// Middle held
-	if (ImGui::GetIO().MouseDown[2]) {
-		vec3 translation = vec3{-rel.x, -rel.y, 0.0f} / m_zoom;
-		bool is_orthographic = m_render_with_lens_distortion && m_render_lens.mode == ELensMode::Orthographic;
-
-		translation /= m_relative_focal_length[m_fov_axis];
-
-		// If we have a valid depth value, scale the scene translation by it such that the
-		// hovered point in 3D space stays under the cursor.
-		if (m_drag_depth < 256.0f && !is_orthographic) {
-			translation *= m_drag_depth;
-		}
-
-		translate_camera(translation, mat3(m_camera));
-	}
-}
+void Testbed::mouse_drag() {}
 
 bool Testbed::begin_frame() {
 	if (glfwWindowShouldClose(m_glfw_window)) {
@@ -2940,7 +2610,7 @@ void Testbed::train_and_render(bool skip_rendering) {
 	float frame_ms = m_camera_path.rendering ? 0.0f : m_frame_ms.val();
 	apply_camera_smoothing(frame_ms);
 
-	if (!m_render_window || !m_render || skip_rendering) {
+	if (!m_render || skip_rendering) {
 		return;
 	}
 
@@ -3408,49 +3078,10 @@ void Testbed::init_window(int resw, int resh, bool hidden, bool second_window) {
 	m_views.front().full_resolution = m_window_res;
 	m_views.front().render_buffer->resize(m_views.front().full_resolution);
 
-	m_pip_render_texture = std::make_shared<GLTexture>();
-	m_pip_render_buffer = std::make_shared<CudaRenderBuffer>(m_pip_render_texture);
-
-	m_render_window = true;
-
-	if (m_second_window.window == nullptr && second_window) {
-		create_second_window();
-	}
+	// GUI-specific OpenGL resources removed in headless build.
 }
 
 #endif     // NGP_GUI
-
-#ifndef NGP_GUI
-void Testbed::init_window(int, int, bool, bool) {
-	throw std::runtime_error{"init_window failed: NGP was built without GUI support"};
-}
-#endif
-
-void Testbed::destroy_window() {
-#ifndef NGP_GUI
-	throw std::runtime_error{"destroy_window failed: NGP was built without GUI support"};
-#else
-	if (!m_render_window) {
-		throw std::runtime_error{"Window must be initialized to be destroyed."};
-	}
-
-	m_hmd.reset();
-
-	m_views.clear();
-	m_rgba_render_textures.clear();
-	m_depth_render_textures.clear();
-
-	m_pip_render_buffer.reset();
-	m_pip_render_texture.reset();
-
-	m_dlss = false;
-	m_dlss_provider.reset();
-#endif
-}
-
-void Testbed::init_vr() {}
-
-void Testbed::update_vr_performance_settings() {}
 
 bool Testbed::frame() {
 	// Render against the trained neural network. If we're training and already close to convergence,
@@ -3508,12 +3139,6 @@ bool Testbed::frame() {
 }
 
 fs::path Testbed::training_data_path() const { return m_data_path.with_extension("training"); }
-
-bool Testbed::want_repl() {
-	bool b = m_want_repl;
-	m_want_repl = false;
-	return b;
-}
 
 void Testbed::apply_camera_smoothing(float elapsed_ms) {
 	// Ensure our camera rotation remains an orthogonal matrix as numeric
@@ -4005,10 +3630,6 @@ Testbed::~Testbed() {
 
 	// If any temporary file was created, make sure it's deleted
 	clear_tmp_dir();
-
-	if (m_render_window) {
-		destroy_window();
-	}
 }
 
 bool Testbed::clear_tmp_dir() {
@@ -4703,57 +4324,6 @@ Testbed::LevelStats compute_level_stats(const float* params, size_t n_params) {
 		}
 	}
 	return s;
-}
-
-void Testbed::gather_histograms() {
-	if (!m_network) {
-		return;
-	}
-
-	int n_params = (int)m_network->n_params();
-	int first_encoder = first_encoder_param();
-	int n_encoding_params = n_params - first_encoder;
-
-	auto hg_enc = dynamic_cast<MultiLevelEncoding<network_precision_t>*>(m_encoding.get());
-	if (hg_enc && m_trainer->params()) {
-		std::vector<float> grid(n_encoding_params);
-
-		uint32_t m = m_network->layer_sizes().front().first;
-		uint32_t n = m_network->layer_sizes().front().second;
-		std::vector<float> first_layer_rm(m * n);
-
-		CUDA_CHECK_THROW(cudaMemcpyAsync(
-			grid.data(), m_trainer->params() + first_encoder, grid.size() * sizeof(float), cudaMemcpyDeviceToHost, m_stream.get()
-		));
-		CUDA_CHECK_THROW(cudaMemcpyAsync(
-			first_layer_rm.data(), m_trainer->params(), first_layer_rm.size() * sizeof(float), cudaMemcpyDeviceToHost, m_stream.get()
-		));
-		CUDA_CHECK_THROW(cudaStreamSynchronize(m_stream.get()));
-
-
-		for (uint32_t l = 0; l < m_n_levels; ++l) {
-			m_level_stats[l] = compute_level_stats(grid.data() + hg_enc->level_params_offset(l), hg_enc->level_n_params(l));
-		}
-
-		int numquant = 0;
-		m_quant_percent = float(numquant * 100) / (float)n_encoding_params;
-		if (m_histo_level < m_n_levels) {
-			size_t nperlevel = hg_enc->level_n_params(m_histo_level);
-			const float* d = grid.data() + hg_enc->level_params_offset(m_histo_level);
-			float scale = 128.f / (m_histo_scale); // fixed scale for now to make it more comparable between levels
-			memset(m_histo, 0, sizeof(m_histo));
-			for (int i = 0; i < nperlevel; ++i) {
-				float v = *d++;
-				if (v == 0.f) {
-					continue;
-				}
-				int bin = (int)floor(v * scale + 128.5f);
-				if (bin >= 0 && bin <= 256) {
-					m_histo[bin]++;
-				}
-			}
-		}
-	}
 }
 
 // Increment this number when making a change to the snapshot format

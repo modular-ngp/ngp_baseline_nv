@@ -72,7 +72,7 @@ public:
 	}
 
 	bool clear_tmp_dir();
-	void update_imgui_paths();
+	// GUI path updates removed in headless build
 	void load_training_data(const fs::path& path);
 	void reload_training_data();
 	void clear_training_data();
@@ -391,8 +391,6 @@ public:
 	void set_visualized_layer(int layer);
 	void translate_camera(const vec3& rel, const mat3& rot, bool allow_up_down = true);
 	mat3 rotation_from_angles(const vec2& angles) const;
-	void mouse_drag();
-	void mouse_wheel();
 	void load_file(const fs::path& path);
 	void set_nerf_camera_matrix(const mat4x3& cam);
 	vec3 look_at() const;
@@ -410,7 +408,6 @@ public:
 	void next_training_view();
 	void set_camera_to_training_view(int trainview);
 	void reset_camera();
-	bool keyboard_event();
 	void generate_training_samples_sdf(vec3* positions, float* distances, uint32_t n_to_generate, cudaStream_t stream, bool uniform_only);
 	void update_density_grid_nerf(
 		float decay, uint32_t n_uniform_density_grid_samples, uint32_t n_nonuniform_density_grid_samples, cudaStream_t stream
@@ -441,8 +438,6 @@ public:
 	template <typename T> void dump_parameters_as_images(const T* params, const std::string& filename_base);
 
 	void prepare_next_camera_path_frame();
-	void overlay_fps();
-	void imgui();
 	void training_prep_nerf(uint32_t batch_size, cudaStream_t stream);
 	void training_prep_sdf(uint32_t batch_size, cudaStream_t stream);
 	void training_prep_image(uint32_t batch_size, cudaStream_t stream) {}
@@ -472,13 +467,13 @@ public:
 	void reproject_views(const std::vector<const View*> src, View& dst);
 	void train_and_render(bool skip_rendering);
 	fs::path training_data_path() const;
+	// GUI / VR entry points kept only for compatibility; no-op in headless build.
 	void init_window(int resw, int resh, bool hidden = false, bool second_window = false);
 	void destroy_window();
 	void init_vr();
 	void update_vr_performance_settings();
 	void apply_camera_smoothing(float elapsed_ms);
 	bool frame();
-	bool want_repl();
 	void load_image(const fs::path& data_path);
 	void load_exr_image(const fs::path& data_path);
 	void load_stbi_image(const fs::path& data_path);
@@ -514,7 +509,6 @@ public:
 
 	bool jit_fusion();
 	void set_jit_fusion(bool val);
-	void gather_histograms();
 
 	////////////////////////////////////////////////////////////////
 	// marching cubes related state
@@ -547,7 +541,6 @@ public:
 		}
 	};
 	MeshState m_mesh;
-	bool m_want_repl = false;
 
 	bool m_include_optimizer_state_in_snapshot = false;
 	bool m_compress_snapshot = true;
@@ -606,13 +599,8 @@ public:
 
 	uint32_t m_seed = 1337;
 	std::shared_ptr<CudaRenderBuffer> m_pip_render_buffer;
-	bool m_render_window = false;
 
 	SharedQueue<std::unique_ptr<ICallable>> m_task_queue;
-
-	void redraw_gui_next_frame() { m_gui_redraw = true; }
-
-	bool m_gui_redraw = true;
 
 	struct Nerf {
 		struct Training {
@@ -724,10 +712,6 @@ public:
 			mat4x3 get_camera_extrinsics(int frame_idx);
 			void update_transforms(int first = 0, int last = -1);
 			void update_extra_dims();
-
-#ifdef NGP_PYTHON
-			void set_image(int frame_idx, pybind11::array_t<float> img, pybind11::array_t<float> depth_img, float depth_scale);
-#endif
 
 			void reset_camera_extrinsics();
 			void export_camera_extrinsics(const fs::path& path, bool export_extrinsics_in_quat_format = true);
@@ -919,22 +903,6 @@ public:
 	bool m_single_view = true;
 
 	float m_picture_in_picture_res = 0.f; // if non zero, requests a small second picture :)
-
-	struct ImGuiVars {
-		static const uint32_t MAX_PATH_LEN = 1024;
-
-		bool show = true;
-		bool overlay_fps = false;
-
-		char cam_path_path[MAX_PATH_LEN] = "cam.json";
-		char extrinsics_path[MAX_PATH_LEN] = "extrinsics.json";
-		char mesh_path[MAX_PATH_LEN] = "base.obj";
-		char snapshot_path[MAX_PATH_LEN] = "base.ingp";
-		char video_path[MAX_PATH_LEN] = "video.mp4";
-		char cam_export_path[MAX_PATH_LEN] = "cam_export.json";
-
-		void* overlay_font = nullptr;
-	} m_imgui;
 
 	fs::path m_root_dir = "";
 
