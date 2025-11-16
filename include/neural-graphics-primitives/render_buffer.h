@@ -25,10 +25,6 @@
 
 namespace ngp {
 
-typedef unsigned int GLenum;
-typedef int          GLint;
-typedef unsigned int GLuint;
-
 class SurfaceProvider {
 public:
 	virtual cudaSurfaceObject_t surface() = 0;
@@ -70,94 +66,6 @@ private:
 	cudaArray_t m_array;
 	cudaSurfaceObject_t m_surface;
 };
-
-#ifdef NGP_GUI
-class GLTexture : public SurfaceProvider {
-public:
-	GLTexture() = default;
-	GLTexture(const std::string& texture_name)
-	: m_texture_name(texture_name), m_texture_id(0)
-	{ }
-
-	GLTexture(const GLTexture& other) = delete;
-
-	GLTexture(GLTexture&& other)
-	: m_texture_name(move(other.m_texture_name)), m_texture_id(other.m_texture_id) {
-		other.m_texture_id = 0;
-	}
-
-	GLTexture& operator=(GLTexture&& other) {
-		m_texture_name = move(other.m_texture_name);
-		std::swap(m_texture_id, other.m_texture_id);
-		return *this;
-	}
-
-	~GLTexture();
-
-	GLuint texture();
-
-	cudaSurfaceObject_t surface() override;
-
-	cudaArray_t array() override;
-
-	void blit_from_cuda_mapping();
-
-	const std::string& texture_name() const { return m_texture_name; }
-
-	bool is_8bit() { return m_is_8bit; }
-
-	void load(const fs::path& path);
-
-	void load(const float* data, ivec2 new_size, int n_channels);
-
-	void load(const uint8_t* data, ivec2 new_size, int n_channels);
-
-	void resize(const ivec2& new_size, int n_channels, bool is_8bit);
-
-	void resize(const ivec2& new_size, int n_channels) override {
-		resize(new_size, n_channels, false);
-	}
-
-	ivec2 resolution() const override {
-		return m_size;
-	}
-
-private:
-	class CUDAMapping {
-	public:
-		CUDAMapping(GLuint texture_id, const ivec2& size, int n_channels);
-		~CUDAMapping();
-
-		cudaSurfaceObject_t surface() const { return m_cuda_surface ? m_cuda_surface->surface() : m_surface; }
-
-		cudaArray_t array() const { return m_cuda_surface ? m_cuda_surface->array() : m_mapped_array; }
-
-		bool is_interop() const { return !m_cuda_surface; }
-
-		const float* data_cpu();
-
-	private:
-		cudaGraphicsResource_t m_graphics_resource = {};
-		cudaArray_t m_mapped_array = {};
-		cudaSurfaceObject_t m_surface = {};
-
-		ivec2 m_size;
-		int m_n_channels;
-		std::vector<float> m_data_cpu;
-
-		std::unique_ptr<CudaSurface2D> m_cuda_surface;
-	};
-
-	std::string m_texture_name;
-	GLuint m_texture_id = 0;
-	ivec2 m_size = ivec2(0);
-	int m_n_channels = 0;
-	GLint m_internal_format;
-	GLenum m_format;
-	bool m_is_8bit = false;
-	std::unique_ptr<CUDAMapping> m_cuda_mapping;
-};
-#endif //NGP_GUI
 
 struct CudaRenderBufferView {
 	vec4* frame_buffer = nullptr;

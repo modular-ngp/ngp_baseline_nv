@@ -26,25 +26,16 @@
 #include <neural-graphics-primitives/thread_pool.h>
 #include <neural-graphics-primitives/trainable_buffer.cuh>
 
-#ifdef NGP_GUI
-#	include <neural-graphics-primitives/openxr_hmd.h>
-#endif
-
 #include <tiny-cuda-nn/multi_stream.h>
 #include <tiny-cuda-nn/random.h>
 #include <tiny-cuda-nn/rtc_kernel.h>
 
 #include <json/json.hpp>
 
-#ifdef NGP_PYTHON
-#	include <pybind11/numpy.h>
-#	include <pybind11/pybind11.h>
-#endif
-
 #include <deque>
 #include <thread>
 
-struct GLFWwindow;
+struct ImDrawList;
 
 namespace tcnn {
 template <typename T> class Loss;
@@ -61,7 +52,6 @@ template <typename T> class NerfNetwork;
 class TriangleOctree;
 class TriangleBvh;
 struct Triangle;
-class GLTexture;
 
 struct ViewIdx {
 	i16vec2 px;
@@ -315,17 +305,8 @@ public:
 		uint32_t n_output;
 		uint32_t n_pos;
 	};
-
-	NetworkDims network_dims_volume() const;
-	NetworkDims network_dims_sdf() const;
-	NetworkDims network_dims_image() const;
 	NetworkDims network_dims_nerf() const;
-
 	NetworkDims network_dims() const;
-
-	void train_volume(size_t target_batch_size, bool get_loss_scalar, cudaStream_t stream);
-	void training_prep_volume(uint32_t batch_size, cudaStream_t stream) {}
-	void load_volume(const fs::path& data_path);
 
 	void render_nerf(
 		cudaStream_t stream,
@@ -341,38 +322,6 @@ public:
 		const Foveation& foveation,
 		const Lens& lens,
 		int visualized_dimension
-	);
-	void render_sdf(
-		cudaStream_t stream,
-		CudaDevice& device,
-		const distance_fun_t& distance_function,
-		const normals_fun_t& normals_function,
-		const CudaRenderBufferView& render_buffer,
-		const vec2& focal_length,
-		const mat4x3& camera_matrix,
-		const vec2& screen_center,
-		const Foveation& foveation,
-		const Lens& lens,
-		int visualized_dimension
-	);
-	void render_image(
-		cudaStream_t stream,
-		const CudaRenderBufferView& render_buffer,
-		const vec2& focal_length,
-		const mat4x3& camera_matrix,
-		const vec2& screen_center,
-		const Foveation& foveation,
-		const Lens& lens,
-		int visualized_dimension
-	);
-	void render_volume(
-		cudaStream_t stream,
-		const CudaRenderBufferView& render_buffer,
-		const vec2& focal_length,
-		const mat4x3& camera_matrix,
-		const vec2& screen_center,
-		const Foveation& foveation,
-		const Lens& lens
 	);
 
 	void render_frame(
@@ -514,20 +463,6 @@ public:
 	size_t first_encoder_param();
 	size_t n_encoding_params();
 
-#ifdef NGP_PYTHON
-	pybind11::dict
-		compute_marching_cubes_mesh(ivec3 res3d = ivec3(128), BoundingBox aabb = BoundingBox{vec3(0.0f), vec3(1.0f)}, float thresh = 2.5f);
-	std::pair<pybind11::array_t<float>, pybind11::array_t<float>>
-		render_to_cpu(int width, int height, int spp, bool linear, float start_t, float end_t, float fps, float shutter_fraction);
-	pybind11::array_t<float>
-		render_to_cpu_rgba(int width, int height, int spp, bool linear, float start_t, float end_t, float fps, float shutter_fraction);
-	pybind11::array_t<float> view(bool linear, size_t view) const;
-	void override_sdf_training_data(pybind11::array_t<float> points, pybind11::array_t<float> distances);
-#	ifdef NGP_GUI
-	pybind11::array_t<float> screenshot(bool linear, bool front_buffer) const;
-#	endif
-#endif
-
 	mat4x3 view_camera(size_t view) const;
 
 	double calculate_iou(
@@ -542,12 +477,6 @@ public:
 	void init_vr();
 	void update_vr_performance_settings();
 	void apply_camera_smoothing(float elapsed_ms);
-	bool begin_frame();
-	void handle_user_input();
-	vec3 vr_to_world(const vec3& pos) const;
-	void begin_vr_frame_and_handle_vr_input();
-	void gather_histograms();
-	void draw_gui();
 	bool frame();
 	bool want_repl();
 	void load_image(const fs::path& data_path);
@@ -585,6 +514,7 @@ public:
 
 	bool jit_fusion();
 	void set_jit_fusion(bool val);
+	void gather_histograms();
 
 	////////////////////////////////////////////////////////////////
 	// marching cubes related state
@@ -618,9 +548,6 @@ public:
 	};
 	MeshState m_mesh;
 	bool m_want_repl = false;
-
-	bool m_render_window = false;
-	bool m_gather_histograms = false;
 
 	bool m_include_optimizer_state_in_snapshot = false;
 	bool m_compress_snapshot = true;
@@ -678,59 +605,8 @@ public:
 	EMeshRenderMode m_mesh_render_mode = EMeshRenderMode::VertexNormals;
 
 	uint32_t m_seed = 1337;
-
-#ifdef NGP_GUI
-	GLFWwindow* m_glfw_window = nullptr;
-	struct SecondWindow {
-		GLFWwindow* window = nullptr;
-		GLuint program = 0;
-		GLuint vao = 0, vbo = 0;
-		void draw(GLuint texture);
-	} m_second_window;
-
-	float m_drag_depth = 1.0f;
-
-	// The VAO will be empty, but we need a valid one for attribute-less rendering
-	GLuint m_blit_vao = 0;
-	GLuint m_blit_program = 0;
-
-	void init_opengl_shaders();
-	void blit_texture(
-		const Foveation& foveation,
-		GLint rgba_texture,
-		GLint rgba_filter_mode,
-		GLint depth_texture,
-		GLint framebuffer,
-		const ivec2& offset,
-		const ivec2& resolution
-	);
-
-	void create_second_window();
-
-	std::unique_ptr<OpenXRHMD> m_hmd;
-	OpenXRHMD::FrameInfoPtr m_vr_frame_info;
-	bool m_vr_use_depth_reproject = false;
-	bool m_vr_use_hidden_area_mask = false;
-
-	void set_n_views(size_t n_views);
-
-	// Callback invoked when a keyboard event is detected.
-	// If the callback returns `true`, the event is considered handled and the default behavior will not occur.
-	std::function<bool()> m_keyboard_event_callback;
-
-	// Callback invoked when a file is dropped onto the window.
-	// If the callback returns `true`, the files are considered handled and the default behavior will not occur.
-	std::function<bool(const std::vector<std::string>&)> m_file_drop_callback;
-
-
-	std::shared_ptr<GLTexture> m_pip_render_texture;
-	std::vector<std::shared_ptr<GLTexture>> m_rgba_render_textures;
-	std::vector<std::shared_ptr<GLTexture>> m_depth_render_textures;
-#endif
-
-
-
 	std::shared_ptr<CudaRenderBuffer> m_pip_render_buffer;
+	bool m_render_window = false;
 
 	SharedQueue<std::unique_ptr<ICallable>> m_task_queue;
 

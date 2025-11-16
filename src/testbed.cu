@@ -34,6 +34,12 @@
 #include <tiny-cuda-nn/rtc_kernel.h>
 #include <tiny-cuda-nn/trainer.h>
 
+#include <imgui/imgui.h>
+#include <imgui/backends/imgui_impl_glfw.h>
+#include <imgui/backends/imgui_impl_opengl3.h>
+#include <imgui/misc/cpp/imgui_stdlib.h>
+#include <imguizmo/ImGuizmo.h>
+
 #include <json/json.hpp>
 
 #include <filesystem/directory.h>
@@ -43,22 +49,6 @@
 
 #include <fstream>
 #include <unordered_set>
-
-#ifdef NGP_GUI
-#	include <imgui/backends/imgui_impl_glfw.h>
-#	include <imgui/backends/imgui_impl_opengl3.h>
-#	include <imgui/misc/cpp/imgui_stdlib.h>
-#	include <imgui/imgui.h>
-#	include <imguizmo/ImGuizmo.h>
-#	ifdef _WIN32
-#		include <GL/gl3w.h>
-#	else
-#		include <GL/glew.h>
-#	endif
-#	include <GLFW/glfw3.h>
-#	include <GLFW/glfw3native.h>
-#	include <cuda_gl_interop.h>
-#endif
 
 // Windows.h is evil
 #undef min
@@ -114,44 +104,7 @@ std::string get_filename_in_data_path_with_suffix(fs::path data_path, fs::path n
 	return data_path.stem().str() + "_" + default_name + std::string(suffix);
 }
 
-void Testbed::update_imgui_paths() {
-	snprintf(
-		m_imgui.cam_path_path,
-		sizeof(m_imgui.cam_path_path),
-		"%s",
-		get_filename_in_data_path_with_suffix(m_data_path, m_network_config_path, "_cam.json").c_str()
-	);
-	snprintf(
-		m_imgui.extrinsics_path,
-		sizeof(m_imgui.extrinsics_path),
-		"%s",
-		get_filename_in_data_path_with_suffix(m_data_path, m_network_config_path, "_extrinsics.json").c_str()
-	);
-	snprintf(
-		m_imgui.mesh_path,
-		sizeof(m_imgui.mesh_path),
-		"%s",
-		get_filename_in_data_path_with_suffix(m_data_path, m_network_config_path, ".obj").c_str()
-	);
-	snprintf(
-		m_imgui.snapshot_path,
-		sizeof(m_imgui.snapshot_path),
-		"%s",
-		get_filename_in_data_path_with_suffix(m_data_path, m_network_config_path, ".ingp").c_str()
-	);
-	snprintf(
-		m_imgui.video_path,
-		sizeof(m_imgui.video_path),
-		"%s",
-		get_filename_in_data_path_with_suffix(m_data_path, m_network_config_path, "_video.mp4").c_str()
-	);
-	snprintf(
-		m_imgui.cam_export_path,
-		sizeof(m_imgui.cam_export_path),
-		"%s",
-		get_filename_in_data_path_with_suffix(m_data_path, m_network_config_path, "_cam_export.json").c_str()
-	);
-}
+void Testbed::update_imgui_paths() {}
 
 void Testbed::load_training_data(const fs::path& path) {
 	if (!path.exists()) {
@@ -230,23 +183,13 @@ void Testbed::set_mode(ETestbedMode mode) {
 		if (m_devices.size() > 1) {
 			m_use_aux_devices = true;
 		}
-	} else {
-		m_use_aux_devices = false;
-	}
-
-	if (
-		m_testbed_mode == ETestbedMode::Nerf
-	) {
 		if (m_dlss_provider && m_aperture_size == 0.0f) {
 			m_dlss = true;
 		}
 	} else {
+		m_use_aux_devices = false;
 		m_dlss = false;
 	}
-
-#ifdef NGP_GUI
-	update_vr_performance_settings();
-#endif
 
 	reset_camera();
 }
@@ -747,211 +690,9 @@ std::unique_ptr<CameraPredictor> create_camera_predictor(ECameraPredictionMode m
 }
 
 #ifdef NGP_GUI
-bool imgui_colored_button(const char* name, float hue) {
-	ImGui::PushStyleColor(ImGuiCol_Button, (ImVec4)ImColor::HSV(hue, 0.6f, 0.6f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonHovered, (ImVec4)ImColor::HSV(hue, 0.7f, 0.7f));
-	ImGui::PushStyleColor(ImGuiCol_ButtonActive, (ImVec4)ImColor::HSV(hue, 0.8f, 0.8f));
-	bool rv = ImGui::Button(name);
-	ImGui::PopStyleColor(3);
-	return rv;
-}
-
-void Testbed::overlay_fps() {
-	ImGui::PushFont((ImFont*)m_imgui.overlay_font);
-	ImGui::SetNextWindowPos({10.0f, 10.0f}, ImGuiCond_Always, {0.0f, 0.0f});
-	ImGui::SetNextWindowBgAlpha(0.35f);
-	if (ImGui::Begin(
-			"Overlay",
-			nullptr,
-			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
-				ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove
-		)) {
-		ImGui::Text("%.1f FPS", 1000.0f / m_render_ms.ema_val());
-	}
-	ImGui::PopFont();
-}
+void Testbed::overlay_fps() {}
 
 void Testbed::imgui() {
-	// If a GUI interaction causes an error, write that error to the following string and call
-	//   ImGui::OpenPopup("Error");
-	static std::string imgui_error_string = "";
-
-	m_picture_in_picture_res = 0;
-	if (ImGui::Begin("Camera path", 0, ImGuiWindowFlags_NoScrollbar)) {
-		if (ImGui::CollapsingHeader("Path manipulation", ImGuiTreeNodeFlags_DefaultOpen)) {
-			ImGui::Checkbox("Record camera path", &m_record_camera_path);
-			ImGui::SameLine();
-			if (ImGui::Button("Clear")) {
-				m_camera_path.clear();
-			}
-
-
-			if (int read = m_camera_path.imgui(
-					m_imgui.cam_path_path,
-					m_render_ms.val(),
-					m_camera,
-					m_slice_plane_z,
-					m_scale,
-					fov(),
-					m_aperture_size,
-					m_bounding_radius,
-					!m_nerf.training.dataset.xforms.empty() ? m_nerf.training.dataset.xforms[0].start : mat4x3::identity()
-				)) {
-				if (
-					!m_camera_path.rendering
-				) {
-					reset_accumulation(true);
-
-					if (m_camera_path.update_cam_from_path) {
-						set_camera_from_time(m_camera_path.play_time);
-
-						// A value of larger than 1 indicates that the camera path wants
-						// to override camera smoothing.
-						if (read > 1) {
-							m_smoothed_camera = m_camera;
-						}
-					} else {
-						m_pip_render_buffer->reset_accumulation();
-					}
-				}
-			}
-
-			if (!m_camera_path.keyframes.empty()) {
-				float w = ImGui::GetContentRegionAvail().x;
-				if (m_camera_path.update_cam_from_path) {
-					m_picture_in_picture_res = 0;
-					ImGui::Image((ImTextureID)(size_t)m_rgba_render_textures.front()->texture(), ImVec2(w, w * 9.0f / 16.0f));
-				} else {
-					m_picture_in_picture_res = (float)std::min((int(w) + 31) & (~31), 1920 / 4);
-					ImGui::Image((ImTextureID)(size_t)m_pip_render_texture->texture(), ImVec2(w, w * 9.0f / 16.0f));
-				}
-			}
-		}
-
-		if (!m_camera_path.keyframes.empty() && ImGui::CollapsingHeader("Export", ImGuiTreeNodeFlags_DefaultOpen)) {
-			bool export_cameras = imgui_colored_button("Export cameras", 0.7);
-
-			ImGui::SameLine();
-
-			static bool w2c = false;
-			ImGui::Checkbox("W2C", &w2c);
-
-			ImGui::InputText("Cameras file##Camera export path", m_imgui.cam_export_path, sizeof(m_imgui.cam_export_path));
-			m_camera_path.render_settings.filename = m_imgui.video_path;
-
-			if (export_cameras) {
-				std::vector<json> cameras;
-				for (uint32_t i = 0; i < m_camera_path.render_settings.n_frames(); ++i) {
-					mat4x3 start_cam = m_camera_path.eval_camera_path((float)i / (m_camera_path.render_settings.n_frames())).m();
-					mat4x3 end_cam = m_camera_path
-										 .eval_camera_path(
-											 ((float)i + m_camera_path.render_settings.shutter_fraction) /
-											 (m_camera_path.render_settings.n_frames())
-										 )
-										 .m();
-					if (w2c) {
-						start_cam = inverse(mat4x4(start_cam));
-						end_cam = inverse(mat4x4(end_cam));
-					}
-
-					cameras.push_back({
-						{"start", start_cam},
-						{"end",   end_cam  },
-					});
-				}
-
-				json j;
-				j["cameras"] = cameras;
-				j["resolution"] = m_camera_path.render_settings.resolution;
-				j["duration_seconds"] = m_camera_path.render_settings.duration_seconds;
-				j["fps"] = m_camera_path.render_settings.fps;
-				j["spp"] = m_camera_path.render_settings.spp;
-				j["quality"] = m_camera_path.render_settings.quality;
-				j["shutter_fraction"] = m_camera_path.render_settings.shutter_fraction;
-
-				std::ofstream f(native_string(m_imgui.cam_export_path));
-				f << j;
-			}
-
-			// Render a video
-			if (imgui_colored_button(m_camera_path.rendering ? "Abort rendering" : "Render video", 0.4)) {
-				bool was_rendering = m_camera_path.rendering;
-				m_camera_path.rendering = !m_camera_path.rendering;
-
-				{
-					if (!clear_tmp_dir()) {
-						imgui_error_string = "Failed to clear temporary directory 'tmp' to hold rendered images.";
-						ImGui::OpenPopup("Error");
-
-						m_camera_path.rendering = false;
-					}
-
-					if (m_camera_path.rendering) {
-						m_camera_path.render_start_time = std::chrono::steady_clock::now();
-						m_camera_path.update_cam_from_path = true;
-						m_camera_path.play_time = 0.0f;
-						m_camera_path.auto_play_speed = 1.0f;
-						m_camera_path.render_frame_idx = 0;
-
-						m_dlss = false;
-						m_train = false;
-
-						reset_accumulation(true);
-						set_camera_from_time(m_camera_path.play_time);
-						m_smoothed_camera = m_camera;
-					} else {
-						m_camera_path.update_cam_from_path = false;
-						m_camera_path.play_time = 0.0f;
-						m_camera_path.auto_play_speed = 0.0f;
-					}
-				}
-			}
-
-
-			if (m_camera_path.rendering) {
-				auto elapsed = std::chrono::steady_clock::now() - m_camera_path.render_start_time;
-
-				uint32_t progress = m_camera_path.render_frame_idx * m_camera_path.render_settings.spp + m_views.front().render_buffer->spp();
-				uint32_t goal = m_camera_path.render_settings.n_frames() * m_camera_path.render_settings.spp;
-				auto est_remaining = elapsed * (float)(goal - progress) / std::max(progress, 1u);
-
-				{
-					ImGui::Text(
-						"%s",
-						fmt::format(
-							"Frame {}/{}, Elapsed: {}, Remaining: {}",
-							m_camera_path.render_frame_idx + 1,
-							m_camera_path.render_settings.n_frames(),
-							tlog::durationToString(std::chrono::steady_clock::now() - m_camera_path.render_start_time),
-							tlog::durationToString(est_remaining)
-						)
-							.c_str()
-					);
-
-					ImGui::ProgressBar((float)progress / goal);
-				}
-			}
-
-			ImGui::BeginDisabled(m_camera_path.rendering);
-
-
-			ImGui::InputText("Video file##Video file path", m_imgui.video_path, sizeof(m_imgui.video_path));
-			m_camera_path.render_settings.filename = m_imgui.video_path;
-			ImGui::SliderInt("MP4 quality", &m_camera_path.render_settings.quality, 0, 10);
-
-			ImGui::InputFloat("Duration (seconds)", &m_camera_path.render_settings.duration_seconds);
-			ImGui::InputFloat("FPS (frames/second)", &m_camera_path.render_settings.fps);
-
-			ImGui::InputInt2("Resolution", &m_camera_path.render_settings.resolution.x);
-			ImGui::InputInt("SPP (samples/pixel)", &m_camera_path.render_settings.spp);
-			ImGui::SliderFloat("Shutter fraction", &m_camera_path.render_settings.shutter_fraction, 0.0f, 1.0f);
-
-			ImGui::EndDisabled(); // end m_camera_path.rendering
-		}
-	}
-	ImGui::End();
-
-
 	bool train_extra_dims = m_nerf.training.dataset.n_extra_learnable_dims > 0;
 	if (train_extra_dims && m_nerf.training.n_images_for_training > 0) {
 		if (ImGui::Begin("Latent space 2D embedding")) {
@@ -2734,7 +2475,9 @@ void Testbed::begin_vr_frame_and_handle_vr_input() {
 		}
 	}
 }
+#endif // NGP_GUI
 
+#ifdef NGP_GUI
 void Testbed::SecondWindow::draw(GLuint texture) {
 	if (!window) {
 		return;
@@ -2932,7 +2675,9 @@ void Testbed::blit_texture(
 	}
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
+#endif // NGP_GUI
 
+#ifdef NGP_GUI
 void Testbed::draw_gui() {
 	// Make sure all the cuda code finished its business here
 	CUDA_CHECK_THROW(cudaDeviceSynchronize());
@@ -3595,128 +3340,20 @@ void Testbed::set_n_views(size_t n_views) {
 		m_views.pop_back();
 	}
 
-	m_rgba_render_textures.resize(n_views);
-	m_depth_render_textures.resize(n_views);
-
 	while (m_views.size() < n_views) {
 		size_t idx = m_views.size();
-		m_rgba_render_textures[idx] = std::make_shared<GLTexture>();
-		m_depth_render_textures[idx] = std::make_shared<GLTexture>();
-		m_views.emplace_back(View{std::make_shared<CudaRenderBuffer>(m_rgba_render_textures[idx], m_depth_render_textures[idx])});
+		auto color_target = std::make_shared<CudaSurface2D>();
+		auto depth_target = std::make_shared<CudaSurface2D>();
+		m_views.emplace_back(View{std::make_shared<CudaRenderBuffer>(color_target, depth_target)});
 	}
 
 	if (changed_views) {
 		set_camera_prediction_mode(m_camera_prediction_mode);
 	}
 };
-#endif // NGP_GUI
 
 void Testbed::init_window(int resw, int resh, bool hidden, bool second_window) {
-#ifndef NGP_GUI
-	throw std::runtime_error{"init_window failed: NGP was built without GUI support"};
-#else
 	m_window_res = {resw, resh};
-
-	glfwSetErrorCallback(glfw_error_callback);
-	if (!glfwInit()) {
-		throw std::runtime_error{"GLFW could not be initialized."};
-	}
-
-#	ifdef NGP_VULKAN
-	// Only try to initialize DLSS (Vulkan+NGX) if the
-	// GPU is sufficiently new. Older GPUs don't support
-	// DLSS, so it is preferable to not make a futile
-	// attempt and emit a warning that confuses users.
-	if (primary_device().compute_capability() >= 70) {
-		try {
-			m_dlss_provider = init_vulkan_and_ngx();
-			if (m_testbed_mode == ETestbedMode::Nerf && m_aperture_size == 0.0f) {
-				m_dlss = true;
-			}
-		} catch (const std::runtime_error& e) {
-			tlog::warning() << "Could not initialize Vulkan and NGX. DLSS not supported. (" << e.what() << ")";
-		}
-	}
-#	endif
-
-	glfwWindowHint(GLFW_VISIBLE, hidden ? GLFW_FALSE : GLFW_TRUE);
-	std::string title = "Instant Neural Graphics Primitives";
-	m_glfw_window = glfwCreateWindow(m_window_res.x, m_window_res.y, title.c_str(), NULL, NULL);
-	if (m_glfw_window == NULL) {
-		throw std::runtime_error{"GLFW window could not be created."};
-	}
-	glfwMakeContextCurrent(m_glfw_window);
-#	ifdef _WIN32
-	if (gl3wInit()) {
-		throw std::runtime_error{"GL3W could not be initialized."};
-	}
-#	else
-	glewExperimental = 1;
-	if (glewInit()) {
-		throw std::runtime_error{"GLEW could not be initialized."};
-	}
-#	endif
-	glfwSwapInterval(0); // Disable vsync
-
-	GLint gl_version_minor, gl_version_major;
-	glGetIntegerv(GL_MINOR_VERSION, &gl_version_minor);
-	glGetIntegerv(GL_MAJOR_VERSION, &gl_version_major);
-
-	if (gl_version_major < 3 || (gl_version_major == 3 && gl_version_minor < 1)) {
-		throw std::runtime_error{
-			fmt::format("Unsupported OpenGL version {}.{}. instant-ngp requires at least OpenGL 3.1", gl_version_major, gl_version_minor)
-		};
-	}
-
-	tlog::success() << "Initialized OpenGL version " << glGetString(GL_VERSION);
-
-	glfwSetWindowUserPointer(m_glfw_window, this);
-	glfwSetDropCallback(m_glfw_window, [](GLFWwindow* window, int count, const char** paths) {
-		Testbed* testbed = (Testbed*)glfwGetWindowUserPointer(window);
-		if (!testbed) {
-			return;
-		}
-
-		if (testbed->m_file_drop_callback) {
-			if (testbed->m_file_drop_callback(std::vector<std::string>(paths, paths + count))) {
-				// Files were handled by the callback.
-				return;
-			}
-		}
-
-		for (int i = 0; i < count; i++) {
-			testbed->load_file(paths[i]);
-		}
-	});
-
-	glfwSetKeyCallback(m_glfw_window, [](GLFWwindow* window, int key, int scancode, int action, int mods) {
-		Testbed* testbed = (Testbed*)glfwGetWindowUserPointer(window);
-		if (testbed) {
-			testbed->redraw_gui_next_frame();
-		}
-	});
-
-	glfwSetCursorPosCallback(m_glfw_window, [](GLFWwindow* window, double xpos, double ypos) {
-		Testbed* testbed = (Testbed*)glfwGetWindowUserPointer(window);
-		if (testbed && (ImGui::IsAnyItemActive() || ImGui::GetIO().WantCaptureMouse || ImGuizmo::IsUsing()) &&
-			(ImGui::GetIO().MouseDown[0] || ImGui::GetIO().MouseDown[1] || ImGui::GetIO().MouseDown[2])) {
-			testbed->redraw_gui_next_frame();
-		}
-	});
-
-	glfwSetMouseButtonCallback(m_glfw_window, [](GLFWwindow* window, int button, int action, int mods) {
-		Testbed* testbed = (Testbed*)glfwGetWindowUserPointer(window);
-		if (testbed) {
-			testbed->redraw_gui_next_frame();
-		}
-	});
-
-	glfwSetScrollCallback(m_glfw_window, [](GLFWwindow* window, double xoffset, double yoffset) {
-		Testbed* testbed = (Testbed*)glfwGetWindowUserPointer(window);
-		if (testbed) {
-			testbed->redraw_gui_next_frame();
-		}
-	});
 
 	glfwSetWindowSizeCallback(m_glfw_window, [](GLFWwindow* window, int width, int height) {
 		Testbed* testbed = (Testbed*)glfwGetWindowUserPointer(window);
@@ -3779,8 +3416,15 @@ void Testbed::init_window(int resw, int resh, bool hidden, bool second_window) {
 	if (m_second_window.window == nullptr && second_window) {
 		create_second_window();
 	}
-#endif     // NGP_GUI
 }
+
+#endif     // NGP_GUI
+
+#ifndef NGP_GUI
+void Testbed::init_window(int, int, bool, bool) {
+	throw std::runtime_error{"init_window failed: NGP was built without GUI support"};
+}
+#endif
 
 void Testbed::destroy_window() {
 #ifndef NGP_GUI
@@ -3801,122 +3445,14 @@ void Testbed::destroy_window() {
 
 	m_dlss = false;
 	m_dlss_provider.reset();
-
-	ImGui_ImplOpenGL3_Shutdown();
-	ImGui_ImplGlfw_Shutdown();
-	ImGui::DestroyContext();
-	glfwDestroyWindow(m_glfw_window);
-	glfwTerminate();
-
-	m_blit_program = 0;
-	m_blit_vao = 0;
-
-	m_glfw_window = nullptr;
-	m_render_window = false;
-#endif // NGP_GUI
+#endif
 }
 
-void Testbed::init_vr() {
-#ifndef NGP_GUI
-	throw std::runtime_error{"init_vr failed: NGP was built without GUI support"};
-#else
-	try {
-		if (!m_glfw_window) {
-			throw std::runtime_error{"`init_window` must be called before `init_vr`"};
-		}
+void Testbed::init_vr() {}
 
-#	if defined(XR_USE_PLATFORM_WIN32)
-		m_hmd = std::make_unique<OpenXRHMD>(wglGetCurrentDC(), glfwGetWGLContext(m_glfw_window));
-#	elif defined(XR_USE_PLATFORM_XLIB)
-		Display* xDisplay = glfwGetX11Display();
-		GLXContext glxContext = glfwGetGLXContext(m_glfw_window);
-
-		int glxFBConfigXID = 0;
-		glXQueryContext(xDisplay, glxContext, GLX_FBCONFIG_ID, &glxFBConfigXID);
-		int attributes[3] = {GLX_FBCONFIG_ID, glxFBConfigXID, 0};
-		int nelements = 1;
-		GLXFBConfig* pglxFBConfig = glXChooseFBConfig(xDisplay, 0, attributes, &nelements);
-		if (nelements != 1 || !pglxFBConfig) {
-			throw std::runtime_error{"init_vr(): Couldn't obtain GLXFBConfig"};
-		}
-
-		GLXFBConfig glxFBConfig = *pglxFBConfig;
-
-		XVisualInfo* visualInfo = glXGetVisualFromFBConfig(xDisplay, glxFBConfig);
-		if (!visualInfo) {
-			throw std::runtime_error{"init_vr(): Couldn't obtain XVisualInfo"};
-		}
-
-		m_hmd = std::make_unique<OpenXRHMD>(xDisplay, visualInfo->visualid, glxFBConfig, glXGetCurrentDrawable(), glxContext);
-#	elif defined(XR_USE_PLATFORM_WAYLAND)
-		m_hmd = std::make_unique<OpenXRHMD>(glfwGetWaylandDisplay());
-#	endif
-
-		// Enable aggressive optimizations to make the VR experience smooth.
-		update_vr_performance_settings();
-
-		// If multiple GPUs are available, shoot for 60 fps in VR.
-		// Otherwise, it wouldn't be realistic to expect more than 30.
-		m_dynamic_res_target_fps = m_devices.size() > 1 ? 60 : 30;
-		m_background_color = {0.0f, 0.0f, 0.0f, 0.0f};
-	} catch (const std::runtime_error& e) {
-		if (std::string{e.what()}.find("XR_ERROR_FORM_FACTOR_UNAVAILABLE") != std::string::npos) {
-			throw std::runtime_error{
-				"Could not initialize VR. Ensure that SteamVR, OculusVR, or any other OpenXR-compatible runtime is running. Also set it as the active OpenXR runtime."
-			};
-		} else {
-			throw std::runtime_error{fmt::format("Could not initialize VR: {}", e.what())};
-		}
-	}
-#endif // NGP_GUI
-}
-
-void Testbed::update_vr_performance_settings() {
-#ifdef NGP_GUI
-	if (m_hmd) {
-		auto blend_mode = m_hmd->environment_blend_mode();
-
-		// DLSS is instrumental in getting VR to look good. Enable if possible.
-		// If the environment is blended in (such as in XR/AR applications),
-		// DLSS causes jittering at object sillhouettes (doesn't deal well with alpha),
-		// and hence stays disabled.
-		m_dlss = (blend_mode == EEnvironmentBlendMode::Opaque) && m_dlss_provider;
-
-		// Foveated rendering is similarly vital in getting high performance without losing
-		// resolution in the middle of the view.
-		m_foveated_rendering = true;
-
-		// Large minimum transmittance results in another 20-30% performance increase
-		// at the detriment of some transparent edges. Not super noticeable, though.
-		m_nerf.render_min_transmittance = 0.2f;
-
-		// Many VR runtimes perform optical flow for automatic reprojection / motion smoothing.
-		// This breaks down for solid-color background, sometimes leading to artifacts. Hence:
-		// set background color to transparent and, in spherical_checkerboard_kernel(...),
-		// blend a checkerboard. If the user desires a solid background nonetheless, they can
-		// set the background color to have an alpha value of 1.0 manually via the GUI or via Python.
-		m_render_transparency_as_checkerboard = (blend_mode == EEnvironmentBlendMode::Opaque);
-	} else {
-		m_dlss = (m_testbed_mode == ETestbedMode::Nerf) && m_dlss_provider;
-		m_foveated_rendering = false;
-		m_nerf.render_min_transmittance = 0.01f;
-		m_render_transparency_as_checkerboard = false;
-	}
-#endif // NGP_GUI
-}
+void Testbed::update_vr_performance_settings() {}
 
 bool Testbed::frame() {
-#ifdef NGP_GUI
-	if (m_render_window) {
-		if (!begin_frame()) {
-			return false;
-		}
-
-		handle_user_input();
-		begin_vr_frame_and_handle_vr_input();
-	}
-#endif
-
 	// Render against the trained neural network. If we're training and already close to convergence,
 	// we can skip rendering if the scene camera doesn't change
 	uint32_t n_to_skip = m_train ? clamp(m_training_step / 16u, 15u, 255u) : 0;
@@ -3957,11 +3493,6 @@ bool Testbed::frame() {
 	}
 
 #ifdef NGP_GUI
-	if (m_hmd && m_hmd->is_visible()) {
-		skip_rendering = false;
-	}
-#endif
-
 	if (!skip_rendering || std::chrono::steady_clock::now() - m_last_gui_draw_time_point > 50ms) {
 		redraw_gui_next_frame();
 	}
@@ -3971,65 +3502,8 @@ bool Testbed::frame() {
 			(*m_task_queue.tryPop())();
 		}
 	} catch (const SharedQueueEmptyException&) {}
-
-
-	train_and_render(skip_rendering);
-	if (m_testbed_mode == ETestbedMode::Sdf && m_sdf.calculate_iou_online) {
-		// m_sdf.iou = calculate_iou(m_train ? 64 * 64 * 64 : 128 * 128 * 128, m_sdf.iou_decay, false, true);
-		m_sdf.iou_decay = 0.f;
-	}
-
-#ifdef NGP_GUI
-	if (m_render_window) {
-		if (m_gui_redraw) {
-			if (m_gather_histograms) {
-				gather_histograms();
-			}
-
-			draw_gui();
-			m_gui_redraw = false;
-
-			m_last_gui_draw_time_point = std::chrono::steady_clock::now();
-		}
-
-		ImGui::EndFrame();
-	}
-
-	if (m_hmd && m_vr_frame_info) {
-		// If HMD is visible to the user, splat rendered images to the HMD
-		if (m_hmd->is_visible()) {
-			size_t n_views = std::min(m_views.size(), m_vr_frame_info->views.size());
-
-			// Blit textures to the OpenXR-owned framebuffers (each corresponding to one eye)
-			for (size_t i = 0; i < n_views; ++i) {
-				const auto& vr_view = m_vr_frame_info->views.at(i);
-
-				ivec2 resolution = {
-					vr_view.view.subImage.imageRect.extent.width,
-					vr_view.view.subImage.imageRect.extent.height,
-				};
-
-				blit_texture(
-					m_views.at(i).foveation,
-					m_rgba_render_textures.at(i)->texture(),
-					GL_LINEAR,
-					m_depth_render_textures.at(i)->texture(),
-					vr_view.framebuffer,
-					ivec2(0),
-					resolution
-				);
-			}
-
-			glFinish();
-		}
-
-		// Far and near planes are intentionally reversed, because we map depth inversely
-		// to z. I.e. a window-space depth of 1 refers to the near plane and a depth of 0
-		// to the far plane. This results in much better numeric precision.
-		m_hmd->end_frame(m_vr_frame_info, m_ndc_zfar / m_scale, m_ndc_znear / m_scale, m_vr_use_depth_reproject);
-	}
 #endif
-
+	train_and_render(skip_rendering);
 	return true;
 }
 
