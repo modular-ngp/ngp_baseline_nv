@@ -21,7 +21,6 @@
 #include <neural-graphics-primitives/nerf.h>
 #include <neural-graphics-primitives/nerf_loader.h>
 #include <neural-graphics-primitives/render_buffer.h>
-#include <neural-graphics-primitives/sdf.h>
 #include <neural-graphics-primitives/shared_queue.h>
 #include <neural-graphics-primitives/thread_pool.h>
 #include <neural-graphics-primitives/trainable_buffer.cuh>
@@ -76,77 +75,6 @@ public:
 	void clear_training_data();
 
 	void set_mode(ETestbedMode mode);
-
-	using distance_fun_t = std::function<void(uint32_t, const vec3*, float*, cudaStream_t)>;
-	using normals_fun_t = std::function<void(uint32_t, const vec3*, vec3*, cudaStream_t)>;
-
-	class SphereTracer {
-	public:
-		SphereTracer() {}
-
-		void init_rays_from_camera(
-			uint32_t spp,
-			const ivec2& resolution,
-			const vec2& focal_length,
-			const mat4x3& camera_matrix,
-			const vec2& screen_center,
-			const vec3& parallax_shift,
-			bool snap_to_pixel_centers,
-			const BoundingBox& aabb,
-			float floor_y,
-			float near_distance,
-			float plane_z,
-			float aperture_size,
-			const Foveation& foveation,
-			const Buffer2DView<const vec4>& envmap,
-			vec4* frame_buffer,
-			float* depth_buffer,
-			const Buffer2DView<const uint8_t>& hidden_area_mask,
-			const Lens& lens,
-			const TriangleOctree* octree,
-			uint32_t n_octree_levels,
-			cudaStream_t stream
-		);
-
-		void init_rays_from_data(uint32_t n_elements, const RaysSdfSoa& data, cudaStream_t stream);
-		uint32_t trace_bvh(TriangleBvh* bvh, const Triangle* triangles, cudaStream_t stream);
-		uint32_t trace(
-			const distance_fun_t& distance_function,
-			const Network<float, network_precision_t>* network,
-			float zero_offset,
-			float distance_scale,
-			float maximum_distance,
-			const BoundingBox& aabb,
-			const float floor_y,
-			const TriangleOctree* octree,
-			uint32_t n_octree_levels,
-			cudaStream_t stream
-		);
-		void enlarge(size_t n_elements, cudaStream_t stream);
-		RaysSdfSoa& rays_hit() { return m_rays_hit; }
-		RaysSdfSoa& rays_init() { return m_rays[0]; }
-		uint32_t n_rays_initialized() const { return m_n_rays_initialized; }
-		void set_trace_shadow_rays(bool val) { m_trace_shadow_rays = val; }
-		void set_shadow_sharpness(float val) { m_shadow_sharpness = val; }
-
-		void set_fused_trace_kernel(CudaRtcKernel* kernel) { m_fused_trace_kernel = kernel; }
-		CudaRtcKernel* fused_trace_kernel() { return m_fused_trace_kernel; }
-
-	private:
-		RaysSdfSoa m_rays[2];
-		RaysSdfSoa m_rays_hit;
-		uint32_t* m_hit_counter;
-		uint32_t* m_alive_counter;
-
-		uint32_t m_n_rays_initialized = 0;
-		ivec2 m_resolution = {0, 0};
-
-		float m_shadow_sharpness = 2048.f;
-		bool m_trace_shadow_rays = false;
-
-		GPUMemoryArena::Allocation m_scratch_alloc;
-		CudaRtcKernel* m_fused_trace_kernel = nullptr;
-	};
 
 	class NerfTracer {
 	public:
@@ -220,29 +148,6 @@ public:
 		uint32_t* m_hit_counter;
 		uint32_t* m_alive_counter;
 		uint32_t m_n_rays_initialized = 0;
-		GPUMemoryArena::Allocation m_scratch_alloc;
-	};
-
-	class FiniteDifferenceNormalsApproximator {
-	public:
-		void enlarge(uint32_t n_elements, cudaStream_t stream);
-		void normal(
-			uint32_t n_elements, const distance_fun_t& distance_function, const vec3* pos, vec3* normal, float epsilon, cudaStream_t stream
-		);
-
-	private:
-		vec3* dx;
-		vec3* dy;
-		vec3* dz;
-
-		float* dist_dx_pos;
-		float* dist_dy_pos;
-		float* dist_dz_pos;
-
-		float* dist_dx_neg;
-		float* dist_dy_neg;
-		float* dist_dz_neg;
-
 		GPUMemoryArena::Allocation m_scratch_alloc;
 	};
 
@@ -740,108 +645,6 @@ public:
 		void set_rendering_extra_dims(const std::vector<float>& vals);
 		std::vector<float> get_rendering_extra_dims_cpu() const;
 	} m_nerf;
-
-	struct Sdf {
-		float shadow_sharpness = 2048.0f;
-		float maximum_distance = 0.00005f;
-		float fd_normals_epsilon = 0.0005f;
-
-		ESDFGroundTruthMode groundtruth_mode = ESDFGroundTruthMode::RaytracedMesh;
-
-		BRDFParams brdf;
-
-		// Mesh data
-		EMeshSdfMode mesh_sdf_mode = EMeshSdfMode::Raystab;
-		float mesh_scale;
-
-		GPUMemory<Triangle> triangles_gpu;
-		std::vector<Triangle> triangles_cpu;
-		std::vector<float> triangle_weights;
-		DiscreteDistribution triangle_distribution;
-		GPUMemory<float> triangle_cdf;
-		std::shared_ptr<TriangleBvh> triangle_bvh; // unique_ptr
-
-		bool uses_takikawa_encoding = false;
-		bool use_triangle_octree = false;
-		int octree_depth_target = 0; // we duplicate this state so that you can waggle the slider without triggering it immediately
-		std::shared_ptr<TriangleOctree> triangle_octree;
-
-		bool analytic_normals = false;
-		float zero_offset = 0;
-		float distance_scale = 0.95f;
-
-		double iou = 0.0;
-		float iou_decay = 0.0f;
-		bool calculate_iou_online = false;
-		GPUMemory<uint32_t> iou_counter;
-		struct Training {
-			size_t idx = 0;
-			size_t size = 0;
-			size_t max_size = 1 << 24;
-			bool did_generate_more_training_data = false;
-			bool generate_sdf_data_online = true;
-			float surface_offset_scale = 1.0f;
-			GPUMemory<vec3> positions;
-			GPUMemory<vec3> positions_shuffled;
-			GPUMemory<float> distances;
-			GPUMemory<float> distances_shuffled;
-			GPUMemory<vec3> perturbations;
-		} training = {};
-	} m_sdf;
-
-	enum EDataType {
-		Float,
-		Half,
-	};
-
-	struct Image {
-		GPUMemory<char> data;
-
-		EDataType type = EDataType::Float;
-		ivec2 resolution = ivec2(0);
-
-		GPUMemory<vec2> render_coords;
-		GPUMemory<vec3> render_out;
-
-		struct Training {
-			GPUMemory<float> positions_tmp;
-			GPUMemory<vec2> positions;
-			GPUMemory<vec3> targets;
-
-			bool snap_to_pixel_centers = true;
-			bool linear_colors = false;
-		} training = {};
-
-		ERandomMode random_mode = ERandomMode::Stratified;
-	} m_image;
-
-	struct VolPayload {
-		vec3 dir;
-		vec4 col;
-		uint32_t pixidx;
-	};
-
-	struct Volume {
-		float albedo = 0.95f;
-		float scattering = 0.f;
-		float inv_distance_scale = 100.f;
-		GPUMemory<char> nanovdb_grid;
-		GPUMemory<uint8_t> bitgrid;
-		float global_majorant = 1.f;
-		vec3 world2index_offset = {0.0f, 0.0f, 0.0f};
-		float world2index_scale = 1.f;
-
-		struct Training {
-			GPUMemory<vec3> positions = {};
-			GPUMemory<vec4> targets = {};
-		} training = {};
-
-		// tracing state
-		GPUMemory<vec3> pos[2] = {{}, {}};
-		GPUMemory<VolPayload> payload[2] = {{}, {}};
-		GPUMemory<uint32_t> hit_counter = {};
-		GPUMemory<vec4> radiance_and_density;
-	} m_volume;
 
 	float m_camera_velocity = 1.0f;
 	EColorSpace m_color_space = EColorSpace::Linear;

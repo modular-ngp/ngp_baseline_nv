@@ -141,11 +141,8 @@ void Testbed::set_mode(ETestbedMode mode) {
 	}
 
 	// Reset mode-specific members
-	m_image = {};
 	m_mesh = {};
 	m_nerf = {};
-	m_sdf = {};
-	m_volume = {};
 
 	// Kill training-related things
 	m_encoding = {};
@@ -1051,8 +1048,6 @@ Testbed::NetworkDims Testbed::network_dims() const {
 }
 
 void Testbed::reset_network(bool clear_density_grid) {
-	m_sdf.iou_decay = 0;
-
 	m_rng = default_rng_t{m_seed};
 
 	// Start with a low rendering resolution and gradually ramp up
@@ -1220,32 +1215,7 @@ void Testbed::reset_network(bool clear_density_grid) {
 			16u :
 			8u;
 
-		if (encoding_config.contains("otype") && equals_case_insensitive(encoding_config["otype"], "Takikawa")) {
-			if (m_sdf.octree_depth_target == 0) {
-				m_sdf.octree_depth_target = encoding_config["n_levels"];
-			}
-
-			if (!m_sdf.triangle_octree || m_sdf.triangle_octree->depth() != m_sdf.octree_depth_target) {
-				m_sdf.triangle_octree.reset(new TriangleOctree{});
-				m_sdf.triangle_octree->build(*m_sdf.triangle_bvh, m_sdf.triangles_cpu, m_sdf.octree_depth_target);
-				m_sdf.octree_depth_target = m_sdf.triangle_octree->depth();
-			}
-
-			m_encoding.reset(new TakikawaEncoding<network_precision_t>(
-				encoding_config["starting_level"],
-				m_sdf.triangle_octree,
-				string_to_interpolation_type(encoding_config.value("interpolation", "linear"))
-			));
-
-			m_sdf.uses_takikawa_encoding = true;
-		} else {
-			m_encoding.reset(create_encoding<network_precision_t>(dims.n_input, encoding_config));
-
-			m_sdf.uses_takikawa_encoding = false;
-			if (m_sdf.octree_depth_target == 0 && encoding_config.contains("n_levels")) {
-				m_sdf.octree_depth_target = encoding_config["n_levels"];
-			}
-		}
+		m_encoding.reset(create_encoding<network_precision_t>(dims.n_input, encoding_config));
 
 		for (auto& device : m_devices) {
 			device.set_network(std::make_shared<NetworkWithInputEncoding<network_precision_t>>(m_encoding, dims.n_output, network_config));
@@ -1697,37 +1667,6 @@ void Testbed::render_frame_main(
 					visualized_dimension
 				);
 			}
-			break;
-		// case ETestbedMode::Sdf: {
-		// 	distance_fun_t distance_fun = m_render_ground_truth ?
-		// 		(distance_fun_t)[&](uint32_t n_elements, const vec3* positions, float* distances, cudaStream_t stream) {
-		// 		m_sdf.triangle_bvh->signed_distance_gpu(
-		// 			n_elements, m_sdf.mesh_sdf_mode, positions, distances, m_sdf.triangles_gpu.data(), false, stream
-		// 		);
-		// 	} : (distance_fun_t)[&](uint32_t n_elements, const vec3* positions, float* distances, cudaStream_t stream) {
-		// 		n_elements = next_multiple(n_elements, BATCH_SIZE_GRANULARITY);
-		// 		GPUMatrix<float> positions_matrix((float*)positions, 3, n_elements);
-		// 		GPUMatrix<float, RM> distances_matrix(distances, 1, n_elements);
-		// 		m_network->inference(stream, positions_matrix, distances_matrix);
-		// 	};
-		//
-		// 	normals_fun_t normals_fun = m_render_ground_truth ?
-		// 		(normals_fun_t)[&](uint32_t n_elements, const vec3* positions, vec3* normals, cudaStream_t stream){
-		// 			// NO-OP. Normals will automatically be populated by raytrace
-		// 		} :
-		// 		(normals_fun_t)[&](uint32_t n_elements, const vec3* positions, vec3* normals, cudaStream_t stream) {
-		// 		n_elements = next_multiple(n_elements, BATCH_SIZE_GRANULARITY);
-		// 		GPUMatrix<float> positions_matrix((float*)positions, 3, n_elements);
-		// 		GPUMatrix<float> normals_matrix((float*)normals, 3, n_elements);
-		// 		m_network->input_gradient(stream, 0, positions_matrix, normals_matrix);
-		// 	};
-		//
-		// 	render_sdf(
-		// 		device.stream(),
-		// 		device,
-		// 		distance_fun,
-		// 		normals_fun,
-		// 		device.render_buffer_view(),
 		// 		focal_length,
 		// 		camera_matrix0,
 		// 		screen_center,
