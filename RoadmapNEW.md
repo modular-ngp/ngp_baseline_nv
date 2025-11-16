@@ -265,3 +265,12 @@
 - 精简命令行和配置，使之只暴露「NeRF synthetic 训练」必需的控制点。
 
 按此 Roadmap 逐步推进，可以最终得到一个代码量明显更小、职责明确、只围绕「训练 NeRF synthetic」的 instant-ngp 精简版。  
+
+## Status update (2025-11-17)
+
+- Phase 3 / `nerf_loader` synthetic-only path:
+  - `src/nerf_loader.cu` now only supports Blender NeRF synthetic-style datasets (`transforms_*.json` + PNG/EXR). Depth images, per-pixel ray files, and dynamic mask branches have been removed from the loader.
+  - When encountering Mitsuba-related JSON fields such as `normal_mts_args` or `from_mitsuba`, `load_nerf` now throws a clear `std::runtime_error` explaining that only NeRF synthetic format is supported.
+- `NerfDataset` / JSON binding alignment:
+  - `include/neural-graphics-primitives/json_binding.h` has been updated so that the serialized/deserialized fields match the current `NerfDataset` definition (e.g. the obsolete `from_mitsuba` field has been removed).
+  - Extended fields used by advanced training logic (`has_rays`, `has_light_dirs`, `n_extra_learnable_dims`, etc.) are still present and used by `testbed_nerf`; they are planned to be simplified in later phases.
