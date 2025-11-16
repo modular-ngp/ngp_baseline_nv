@@ -32,12 +32,13 @@ This is a **completely independent** implementation that:
 - [x] CLI argument parsing
 - [x] Compiles successfully
 
-### Phase 3: Data Loading (TODO)
-- [ ] Math types (`vec2/3/4`, `mat3/4x3`, `BoundingBox`)
-- [ ] `GPUMemory<T>` CUDA memory management
-- [ ] `NerfDataset` structure
-- [ ] Blender NeRF-synthetic JSON parser
-- [ ] Image loading (PNG via stb_image)
+### Phase 3: Data Loading ✅
+- [x] Math types (`vec2/3/4`, `mat3/4x3`, `BoundingBox`)
+- [x] `GPUMemory<T>` CUDA memory management
+- [x] `NerfDataset` structure
+- [x] Blender NeRF-synthetic JSON parser
+- [x] Image loading (PNG via stb_image)
+- [x] **Verified**: Successfully loaded lego dataset (400 images, 800x800)
 
 ### Phase 4: Network & Training Core (TODO)
 - [ ] `NerfNetwork<T>` wrapper (tiny-cuda-nn)
