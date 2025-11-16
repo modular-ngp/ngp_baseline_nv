@@ -87,3 +87,5 @@ target_link_libraries(ngp-baseline-nv PUBLIC tiny-cuda-nn ngp-resources)
 
 add_executable(ngp-baseline-nv-app main.cu)
 target_link_libraries(ngp-baseline-nv-app PRIVATE ngp-baseline-nv)
+
+add_subdirectory(ngp-minimal)
