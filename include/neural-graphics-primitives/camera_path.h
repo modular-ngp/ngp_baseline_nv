@@ -18,15 +18,9 @@
 
 #include <tiny-cuda-nn/common.h>
 
-#ifdef NGP_GUI
-#include <imgui/imgui.h>
-#include <imguizmo/ImGuizmo.h>
-#endif
 
 #include <chrono>
 #include <vector>
-
-struct ImDrawList;
 
 namespace ngp {
 
@@ -198,18 +192,7 @@ struct CameraPath {
 
 	void add_camera(const mat4x3& camera, float slice_plane_z, float scale, float fov, float aperture_size, float bounding_radius, float timestamp);
 
-#ifdef NGP_GUI
-	ImGuizmo::MODE m_gizmo_mode = ImGuizmo::LOCAL;
-	ImGuizmo::OPERATION m_gizmo_op = ImGuizmo::TRANSLATE;
-	int imgui(char path_filename_buf[1024], float frame_milliseconds, const mat4x3& camera, float slice_plane_z, float scale, float fov, float aperture_size, float bounding_radius, const mat4x3& first_xform);
-	bool imgui_viz(ImDrawList* list, mat4& view2proj, mat4& world2proj, mat4& world2view, vec2 focal, float aspect, float znear, float zfar, CameraPredictor* cam_predictor);
-#endif
 };
 
-#ifdef NGP_GUI
-void add_debug_line(ImDrawList* list, const mat4&proj, vec3 a, vec3 b, uint32_t col = 0xffffffff, float thickness = 1.0f);
-void visualize_cube(ImDrawList* list, const mat4& world2proj, const vec3& a, const vec3& b, const mat3& render_aabb_to_local);
-void visualize_camera(ImDrawList* list, const mat4& world2proj, const mat4x3& xform, float aspect, uint32_t col = 0x80ffffff, float thickness = 1.0f);
-#endif
 
 }

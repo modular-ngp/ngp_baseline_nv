@@ -35,8 +35,6 @@
 #include <deque>
 #include <thread>
 
-struct ImDrawList;
-
 namespace tcnn {
 template <typename T> class Loss;
 template <typename T> class Optimizer;
@@ -363,9 +361,6 @@ public:
 		CudaRenderBuffer& render_buffer,
 		bool to_srgb = true
 	);
-	void visualize_nerf_cameras(ImDrawList* list, const mat4& world2proj);
-
-
 	void set_camera_prediction_mode(ECameraPredictionMode mode);
 	ECameraPredictionMode camera_prediction_mode() const;
 	mat4x3 predict_view_camera(size_t view, float dt) const;
@@ -408,7 +403,6 @@ public:
 	void next_training_view();
 	void set_camera_to_training_view(int trainview);
 	void reset_camera();
-	void generate_training_samples_sdf(vec3* positions, float* distances, uint32_t n_to_generate, cudaStream_t stream, bool uniform_only);
 	void update_density_grid_nerf(
 		float decay, uint32_t n_uniform_density_grid_samples, uint32_t n_nonuniform_density_grid_samples, cudaStream_t stream
 	);
@@ -431,23 +425,20 @@ public:
 
 	void train_nerf(uint32_t target_batch_size, bool get_loss_scalar, cudaStream_t stream);
 	void train_nerf_step(uint32_t target_batch_size, NerfCounters& counters, cudaStream_t stream);
-	void train_sdf(size_t target_batch_size, bool get_loss_scalar, cudaStream_t stream);
-	void train_image(size_t target_batch_size, bool get_loss_scalar, cudaStream_t stream);
+	// SDF/Image training removed in Nerf-only build
 	void set_train(bool mtrain);
 
 	template <typename T> void dump_parameters_as_images(const T* params, const std::string& filename_base);
 
 	void prepare_next_camera_path_frame();
 	void training_prep_nerf(uint32_t batch_size, cudaStream_t stream);
-	void training_prep_sdf(uint32_t batch_size, cudaStream_t stream);
-	void training_prep_image(uint32_t batch_size, cudaStream_t stream) {}
+	// Non-NeRF training prep removed
 	void train(uint32_t batch_size);
 	vec2 calc_focal_length(const ivec2& resolution, const vec2& relative_focal_length, int fov_axis, float zoom) const;
 	vec2 render_screen_center(const vec2& screen_center) const;
 	void optimise_mesh_step(uint32_t N_STEPS);
 	void compute_mesh_vertex_colors();
-	GPUMemory<float> get_density_on_grid(ivec3 res3d, const BoundingBox& aabb, const mat3& render_aabb_to_local); // network version (nerf or sdf)
-	GPUMemory<float> get_sdf_gt_on_grid(ivec3 res3d, const BoundingBox& aabb, const mat3& render_aabb_to_local); // sdf gt version (sdf only)
+	GPUMemory<float> get_density_on_grid(ivec3 res3d, const BoundingBox& aabb, const mat3& render_aabb_to_local); // network version (nerf)
 	GPUMemory<vec4> get_rgba_on_grid(ivec3 res3d, vec3 ray_dir, bool voxel_centers, float depth, bool density_as_alpha = false);
 	int marching_cubes(ivec3 res3d, const BoundingBox& render_aabb, const mat3& render_aabb_to_local, float thresh);
 
@@ -463,15 +454,9 @@ public:
 	double calculate_iou(
 		uint32_t n_samples = 128 * 1024 * 1024, float scale_existing_results_factor = 0.0, bool blocking = true, bool force_use_octree = true
 	);
-	void draw_visualizations(ImDrawList* list, const mat4x3& camera_matrix);
 	void reproject_views(const std::vector<const View*> src, View& dst);
 	void train_and_render(bool skip_rendering);
 	fs::path training_data_path() const;
-	// GUI / VR entry points kept only for compatibility; no-op in headless build.
-	void init_window(int resw, int resh, bool hidden = false, bool second_window = false);
-	void destroy_window();
-	void init_vr();
-	void update_vr_performance_settings();
 	void apply_camera_smoothing(float elapsed_ms);
 	bool frame();
 	void load_image(const fs::path& data_path);

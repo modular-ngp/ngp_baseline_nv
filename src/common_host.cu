@@ -147,38 +147,24 @@ ETestbedMode mode_from_scene(const std::string& scene) {
 		return ETestbedMode::None;
 	}
 
+	// In the slimmed version, only NeRF (directory/json) scenes are supported.
 	if (scene_path.is_directory() || equals_case_insensitive(scene_path.extension(), "json")) {
 		return ETestbedMode::Nerf;
-	} else if (equals_case_insensitive(scene_path.extension(), "obj") || equals_case_insensitive(scene_path.extension(), "stl")) {
-		return ETestbedMode::Sdf;
-	} else if (equals_case_insensitive(scene_path.extension(), "nvdb")) {
-		return ETestbedMode::Volume;
-	} else { // probably an image. Too bothersome to list all supported ones: exr, bin, jpg, png, tga, hdr, ...
-		return ETestbedMode::Image;
 	}
 
+	return ETestbedMode::None;
 }
 
 ETestbedMode mode_from_string(const std::string& str) {
 	if (equals_case_insensitive(str, "nerf")) {
 		return ETestbedMode::Nerf;
-	} else if (equals_case_insensitive(str, "sdf")) {
-		return ETestbedMode::Sdf;
-	} else if (equals_case_insensitive(str, "image")) {
-		return ETestbedMode::Image;
-	} else if (equals_case_insensitive(str, "volume")) {
-		return ETestbedMode::Volume;
-	} else {
-		return ETestbedMode::None;
 	}
+	return ETestbedMode::None;
 }
 
 std::string to_string(ETestbedMode mode) {
 	switch (mode) {
 		case ETestbedMode::Nerf: return "nerf";
-		case ETestbedMode::Sdf: return "sdf";
-		case ETestbedMode::Image: return "image";
-		case ETestbedMode::Volume: return "volume";
 		case ETestbedMode::None: return "none";
 		default: throw std::runtime_error{fmt::format("Can not convert mode {} to string.", (int)mode)};
 	}
