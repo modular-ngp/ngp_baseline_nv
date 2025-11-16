@@ -129,7 +129,6 @@ inline void to_json(nlohmann::json& j, const NerfDataset& dataset) {
 	j["envmap_resolution"] = dataset.envmap_resolution;
 	j["scale"] = dataset.scale;
 	j["aabb_scale"] = dataset.aabb_scale;
-	j["from_mitsuba"] = dataset.from_mitsuba;
 	j["is_hdr"] = dataset.is_hdr;
 	j["wants_importance_sampling"] = dataset.wants_importance_sampling;
 	j["n_extra_learnable_dims"] = dataset.n_extra_learnable_dims;
@@ -174,7 +173,6 @@ inline void from_json(const nlohmann::json& j, NerfDataset& dataset) {
 	dataset.envmap_resolution = j.at("envmap_resolution");
 	dataset.scale = j.at("scale");
 	dataset.aabb_scale = j.at("aabb_scale");
-	dataset.from_mitsuba = j.at("from_mitsuba");
 	dataset.is_hdr = j.value("is_hdr", false);
 
 	if (j.contains("wants_importance_sampling")) {

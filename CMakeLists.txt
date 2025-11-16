@@ -32,8 +32,6 @@ add_library(ngp-baseline-nv
         src/testbed_nerf.cu
         src/thread_pool.cpp
         src/tinyexr_wrapper.cu
-        src/tinyobj_loader_wrapper.cu
-        src/triangle_bvh.cu
 )
 find_package(ZLIB REQUIRED)
 find_path(ZSTR_INCLUDE_DIRS "zstr.hpp")

@@ -74,7 +74,6 @@ struct NerfDataset {
 	ivec2 envmap_resolution = {0, 0};
 	float scale = 1.0f;
 	int aabb_scale = 1;
-	bool from_mitsuba = false;
 	bool is_hdr = false;
 	bool wants_importance_sampling = true;
 	bool has_rays = false;
@@ -88,14 +87,10 @@ struct NerfDataset {
 
 	void set_training_image(int frame_idx, const ivec2& image_resolution, const void* pixels, const void* depth_pixels, float depth_scale, bool image_data_on_gpu, EImageDataType image_type, EDepthDataType depth_type, float sharpen_amount = 0.f, bool white_transparent = false, bool black_transparent = false, uint32_t mask_color = 0, const Ray *rays = nullptr);
 
-	vec3 nerf_direction_to_ngp(const vec3& nerf_dir) {
-		vec3 result = nerf_dir;
-		if (from_mitsuba) {
-			result *= -1.0f;
-		} else {
-			result = vec3{result.y, result.z, result.x};
-		}
-		return result;
+	// Coordinate conversions for Blender NeRF synthetic datasets (no Mitsuba path).
+	vec3 nerf_direction_to_ngp(const vec3& nerf_dir) const {
+		// Cycle axes xyz<-yzx
+		return vec3{nerf_dir.y, nerf_dir.z, nerf_dir.x};
 	}
 
 	mat4x3 nerf_matrix_to_ngp(const mat4x3& nerf_matrix, bool scale_columns = false) const {
@@ -105,32 +100,24 @@ struct NerfDataset {
 		result[2] *= scale_columns ? -scale : -1.f;
 		result[3] = result[3] * scale + offset;
 
-		if (from_mitsuba) {
-			result[0] *= -1.0f;
-			result[2] *= -1.0f;
-		} else {
-			// Cycle axes xyz<-yzx
-			vec4 tmp = row(result, 0);
-			result = row(result, 0, row(result, 1));
-			result = row(result, 1, row(result, 2));
-			result = row(result, 2, tmp);
-		}
+		// Cycle axes xyz<-yzx
+		vec4 tmp = row(result, 0);
+		result = row(result, 0, row(result, 1));
+		result = row(result, 1, row(result, 2));
+		result = row(result, 2, tmp);
 
 		return result;
 	}
 
 	mat4x3 ngp_matrix_to_nerf(const mat4x3& ngp_matrix, bool scale_columns = false) const {
 		mat4x3 result = ngp_matrix;
-		if (from_mitsuba) {
-			result[0] *= -1.0f;
-			result[2] *= -1.0f;
-		} else {
-			// Cycle axes xyz->yzx
-			vec4 tmp = row(result, 0);
-			result = row(result, 0, row(result, 2));
-			result = row(result, 2, row(result, 1));
-			result = row(result, 1, tmp);
-		}
+
+		// Cycle axes xyz->yzx
+		vec4 tmp = row(result, 0);
+		result = row(result, 0, row(result, 2));
+		result = row(result, 2, row(result, 1));
+		result = row(result, 1, tmp);
+
 		result[0] *= scale_columns ?  1.f/scale :  1.f;
 		result[1] *= scale_columns ? -1.f/scale : -1.f;
 		result[2] *= scale_columns ? -1.f/scale : -1.f;
@@ -139,18 +126,16 @@ struct NerfDataset {
 	}
 
 	vec3 ngp_position_to_nerf(vec3 pos) const {
-		if (!from_mitsuba) {
-			pos = vec3{pos.z, pos.x, pos.y};
-		}
+		pos = vec3{pos.z, pos.x, pos.y};
 		return (pos - offset) / scale;
 	}
 
 	vec3 nerf_position_to_ngp(const vec3 &pos) const {
 		vec3 rv = pos * scale + offset;
-		return from_mitsuba ? rv : vec3{rv.y, rv.z, rv.x};
+		return vec3{rv.y, rv.z, rv.x};
 	}
 
-	void nerf_ray_to_ngp(Ray& ray, bool scale_direction = false) {
+	void nerf_ray_to_ngp(Ray& ray, bool scale_direction = false) const {
 		ray.o = ray.o * scale + offset;
 		if (scale_direction) {
 			ray.d *= scale;

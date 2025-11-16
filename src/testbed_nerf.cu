@@ -23,7 +23,6 @@
 #include <neural-graphics-primitives/render_buffer.h>
 #include <neural-graphics-primitives/testbed.h>
 #include <neural-graphics-primitives/trainable_buffer.cuh>
-#include <neural-graphics-primitives/triangle_octree.cuh>
 
 #include <tiny-cuda-nn/encodings/grid.h>
 #include <tiny-cuda-nn/encodings/spherical_harmonics.h>
